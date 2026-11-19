@@ -3,7 +3,7 @@
 Contesto: [docs/RECON.md](docs/RECON.md) (ricognizione dei firmware),
 [docs/hardware_research.md](docs/hardware_research.md) (documentazione pubblica), [README.md](README.md).
 
-**Stato (fine sessione 2, 2026-11-19 sera)**: tutto l'hardware dell'ADAM è emulato a basso livello
+**Stato (fine sessione 2, 2026-11-19 sera; prossimo: SGM + profilazione VDP)**: tutto l'hardware dell'ADAM è emulato a basso livello
 (Z80, VDP, PSG, master, tastiera, Digital Data Pack, due floppy con tutte le ROM di controller note,
 stampante con pagina PNG e suono, espansione di memoria). Gira tutto il software provato (elenco in
 docs/RECON.md, "Software provato"). Immagini di test in `media/` (usare sempre copie: l'emulatore
@@ -108,6 +108,13 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
 
 ## Prossimi passi
 
+**Prima di tutto (deciso il 2026-11-19): Super Game Module + profilazione VDP**, vedi la sezione
+"SGM e FF1" più sotto. Motivo: l'hardware ADAM è completo, e il kit NES -> Coleco (progetto
+separato, aperto in parallelo) avrà bisogno di un banco di prova che segnali ciò che MAME non
+dice: accessi alla VRAM troppo ravvicinati, sprite persi per riga, tempo di frame consumato.
+
+Poi le rifiniture, nessuna bloccante:
+
 1. **Log Maker** (`.lbr` CP/M): i membri sono compressi LZH (crunch, firma `76 FD`): servono un
    decompressore (strumento Python) e uno strumento per scrivere file su un disco CP/M ADAM
    (parametri del DPB nel sorgente CP/M di `media/`).
@@ -126,7 +133,7 @@ Risorse: `media/ADAM CP-M 2.2 Source (2025-10-01) (Nino Brunori)/` = sorgente ri
 CP/M ADAM (utile per il terminale a 80 colonne virtuali e i driver); `docs/dis/` = disassemblati
 dei 6801 (`tools/gendis.sh`); `build/dz80` per lo Z80.
 
-## In fondo, a hardware completato
+## SGM e FF1 (prossimo lavoro), poi il kit Apple II
 
 - **Super Game Module** (AY-3-8910, RAM extra; la sua porta di mappatura RAM coincide con la
   0x7F dell'ADAM, da verificare sulla documentazione) + **profilazione VDP**: violazioni dei
