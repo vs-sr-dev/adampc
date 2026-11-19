@@ -1,0 +1,11 @@
+# build output and scratch runs
+/build/
+# firmware dumps and commercial software images: not ours to redistribute
+/roms/
+/media/
+# emulator outputs
+*.png
+*.wav
+adampc_printout.txt
+# disassemblies of the 6801 ROMs: generated from your own ROMs by tools/gendis.sh
+/docs/dis/
