@@ -124,7 +124,7 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
 
 Risorse: `media/ADAM CP-M 2.2 Source (2025-10-01) (Nino Brunori)/` = sorgente ricostruito del
 CP/M ADAM (utile per il terminale a 80 colonne virtuali e i driver); `docs/dis/` = disassemblati
-dei 6801; `build/dz80` per lo Z80.
+dei 6801 (`tools/gendis.sh`); `build/dz80` per lo Z80.
 
 ## In fondo, a hardware completato
 
@@ -137,14 +137,24 @@ dei 6801; `build/dz80` per lo Z80.
   eventualmente in modalità ADAM (memoria via 0x7F, audio di ripiego sull'SN76489).
   È anche l'oracolo del futuro kit game-agnostic NES -> Coleco SGM, che potrebbe avere
   l'ADAM come target quasi gratis (stessi VDP, PSG, Z80; più RAM; manca solo l'AY).
-- **Dopo SGM/FF1: Wizardry I (Apple II) sull'ADAM, approccio BYOA.** Il repo "Wizardry Proving
-  Grounds v3.2" (sorgente ricostruito) non ha licenza ed è derivato da un'opera altrui: non usarlo.
-  Strada: Wizardry Apple gira sul p-System UCSD (Apple Pascal 1.1), `WIZARDRY.CODE` è p-code.
-  1) lettore del file system Apple Pascal per i dischi dell'utente; 2) interprete p-code in Z80
-  scritto dai manuali pubblici della p-machine; 3) riscrittura Z80 delle parti in assembly 6502
-  (labirinto, ritratti, suono, disco) e delle unità Apple Pascal usate; 4) far girare il
-  `WIZARDRY.CODE` originale dell'utente. Grafica 280x192 monocroma -> 256x192 Graphics II;
-  memoria: 64K + `--xram`. Precedenti Z80: versioni MSX e PC-88 (solo come indizio di fattibilità).
-  Serve: immagini dei dischi originali (master + scenario).
+- **Dopo SGM/FF1: kit game-agnostic Apple II -> ADAM, banco di prova Wizardry I.** BYOA: il repo
+  "Wizardry Proving Grounds v3.2" (sorgente ricostruito, senza licenza, derivato da un'opera
+  altrui) non si usa. Stessa forma di JagFF4: traduttore + ponte hardware + profilo facoltativo.
+  - **Traduttore 6502 -> Z80**: lo stesso pezzo serve al kit NES -> Coleco SGM, scriverlo una volta.
+    Codice automodificante: ricaduta su un interprete per quelle zone.
+  - **Tre ingressi ciechi**: (1) p-System/Apple Pascal (Wizardry: `WIZARDRY.CODE` è p-code) ->
+    p-machine Z80 dai manuali pubblici + unità Apple Pascal, gli EXTERNAL 6502 via traduttore;
+    (2) binari 6502 -> traduttore + ponte; (3) Applesoft -> tradurre l'interprete Applesoft dalla
+    ROM Apple dell'utente (programmi intatti, 40 colonne); la via SmartBASIC resta quella leggera.
+  - **Ponte**: testo 40x24 -> Text mode TMS 1:1; lo-res 40x48 -> Multicolor 64x48; hi-res
+    280x192 -> Graphics II 256x192 con fusione OR 35:32 (le linee da 1 pixel non spariscono;
+    profilo: OR / ritaglio / allineato a sinistra), scritture in $2000-$3FFF intercettate, copia in
+    RAM, invio al VDP dei byte cambiati a ogni frame, page flip = doppio buffer; language card ->
+    mappa 0x7F / espansione 0x42; tastiera via EOS; altoparlante $C030 -> SN76489 a 1 bit;
+    paddle -> controller; disco RWTS/BIOS Pascal -> blocchi EOS su immagine convertita
+    (140K Apple in un disco ADAM da 160K, 2 blocchi Pascal = 1 blocco ADAM).
+  - Limiti: codice cronometrato (musica sull'altoparlante), protezioni dalla copia (serve
+    un'immagine non protetta), colore hi-res da artefatti NTSC solo approssimato.
+  - Serve: immagini dei dischi Wizardry I (master + scenario), ROM Apple II dell'utente per Applesoft.
 - Contesto kit GB -> ADAM: lo scroll a passi di 8 pixel è la scelta già validata con FF1;
   restano i vincoli su sprite (4 per linea, 1 colore) e colore dello sfondo (2 per segmento 8x1).
