@@ -243,6 +243,17 @@ modem di Pippin (pippin-homebrew: seriale su DBDMA, prima del supporto in Dingus
 - Ponte TCP sull'host: `ATDT` verso un host:porta telnet, così l'ADAM emulato chiama le BBS
   ancora vive. Il nodo AdamNet 0x0B (il modem esterno da 1200 baud mai uscito) resta un'idea a parte.
 - FrogFind escluso: a 300 baud e su 31 colonne, il web passa solo da un proxy testuale stile cdinet.
+- Software di prova procurato dall'utente (2026-11-20), le versioni di ADAMLink patchate da
+  Tom Clary (oltre agli originali ADAMLink I e II di Coleco):
+  - **ADAMLink II Patches** (1987, "Patched for D.M.P."): XMODEM in invio e ricezione dal menu dei
+    file, stampa su una stampante ad aghi via interfaccia parallela.
+  - **ADAMLink III** (1987-88): XMODEM dal menu dei file (SmartKey VI), stampa ad aghi dopo
+    FASTPATCH; documentazione "ADAMLink III Xmodem Patch Documentation".
+  - **ADAMLink III+** (1989): modem interno ADAMLink **o Hayes esterno fino a 2400 baud**, XMODEM,
+    cattura del testo; la schermata di setup sceglie stampante, terminale e tipo di modem; sul
+    disco anche la documentazione (AL3+_DOC). Il più utile: prova sia l'ADAMlink sia la via
+    seriale + Hayes con lo stesso programma, e il codice che pilota i due modem dice quali porte
+    e registri usano (dove manca la documentazione del chip).
 
 Seguiti possibili del profilatore:
 - profilatore nella finestra: grafico del tempo di frame sovrapposto, righe con sprite persi
