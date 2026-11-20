@@ -70,7 +70,7 @@ static void draw_sprites(TMS9918 *v, int y, uint8_t *out)
     const uint8_t *spg = v->vram + ((v->reg[6] & 7) << 11);
     int big = v->reg[1] & 2, mag = v->reg[1] & 1;
     int size = (big ? 16 : 8) << mag;
-    int shown[4], nshown = 0, i;
+    int shown[4], nshown = 0, i, extra = 0, fifth = -1;
     for (i = 0; i < 32; i++) {
         int sy = sat[i * 4];
         if (sy == 0xD0) break;
@@ -78,12 +78,15 @@ static void draw_sprites(TMS9918 *v, int y, uint8_t *out)
         int row = y - sy - 1;
         if (row < 0 || row >= size) continue;
         if (nshown == 4) {
-            if (!(v->status & 0x40)) v->status = (uint8_t)((v->status & 0xA0) | 0x40 | i);
-            break;
+            /* 5S is set only while the frame flag is 0 (data manual 2.3.3) */
+            if (!extra && !(v->status & 0xC0)) { v->status = (uint8_t)((v->status & 0xA0) | 0x40 | i); fifth = i; }
+            extra++;               /* the profiler counts every sprite the line loses */
+            continue;
         }
         shown[nshown++] = i;
     }
-    if (!(v->status & 0x40)) v->status = (uint8_t)((v->status & 0xE0) | (i > 31 ? 31 : i));
+    if (extra) { v->prof_5s_lines++; v->prof_dropped += (uint32_t)extra; }
+    if (fifth < 0 && !(v->status & 0x40)) v->status = (uint8_t)((v->status & 0xE0) | (i > 31 ? 31 : i));
 
     uint8_t taken[256];
     memset(taken, 0, sizeof taken);

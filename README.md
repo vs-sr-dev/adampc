@@ -7,7 +7,9 @@ to each other over an emulated serial wire.
 
 **Work in progress.** All the ADAM hardware is emulated: the machine boots into SmartWriter,
 the keyboard types through the full AdamNet chain, and tape, disk and printer work through
-their own 6801 firmware.
+their own 6801 firmware. It also runs as a plain **ColecoVision**, with the **Super Game
+Module** and **MegaCart** cartridges, and has a **VDP and frame-time profiler** meant for
+people writing ColecoVision/ADAM software (see "Profiling").
 
 ## What is emulated
 
@@ -23,10 +25,14 @@ their own 6801 firmware.
 | Digital Data Pack | MC6801 (expanded mode) + its ROM, 1K buffer | two drives; tape modelled as bi-phase flux cells with motor, speed, brake and end-of-tape; reads and writes `.ddp` images |
 | Disk drives | MC6801 + 4K ROM + WD2793 (one per drive) | `.dsk` images; rotation, MFM byte timing, head stepping, INTRQ -> NMI, format; the alternative controller ROMs for 320K, 720K and 1.44M drives (side and data rate from the 6801's port 1) |
 | Printer | MC6801 + its ROM | daisy wheel, carriage, platen and hammer mechanics; the petal facing the paper when the hammer falls goes to a text file and a page image (`--printer FILE` writes FILE and FILE.png; `adampc_printout.txt` in the window); the mechanism is audible |
+| Super Game Module | AY-3-8910 @ 1.789772 MHz + 32K RAM | `--sgm`: AY at ports 0x50/0x51/0x52 (tones, noise, envelope); on a ColecoVision also 24K at 0x2000-0x7FFF (port 0x53 bit 0) and 8K over the BIOS (port 0x7F bit 1 = 0) |
+| Cartridges | ColecoVision, MegaCart | up to 1 MB; more than 32K = MegaCart: last 16K bank fixed at 0x8000, reading 0xFFC0+N maps bank N at 0xC000 |
+| ColecoVision | the same Z80, VDP and PSG | `--coleco`: no ADAM, 1K of RAM mirrored at 0x6000-0x7FFF, BIOS = OS-7 |
 
 Runs: SmartWriter (typewriter and word processor, printing, STORE/GET on tape), SmartLOGO
 (tape), SmartBASIC 1.2 (disk and tape, SAVE/LOAD, typed-in listings), CP/M 2.2 + WordStar,
-Adam Links Golf, Market Monitor.
+Adam Links Golf, Market Monitor; the coleco-ff port of Final Fantasy (SGM + 512K MegaCart) on
+both the ColecoVision and the ADAM.
 
 ## Bring your own files
 
@@ -97,6 +103,46 @@ Esc = ESCAPE/WP. Left Alt + R computer reset, + G game reset, + P screenshot,
 + 1..0 / - / = controller keypad. Controller 1: gamepad, or numpad 8/4/6/2, numpad 0 and
 numpad Enter for the two buttons.
 
+### ColecoVision, Super Game Module, MegaCart
+
+    build/adampc --coleco --sgm --cart game.rom        # ColecoVision + SGM
+    build/adampc --sgm --cart game.rom                 # the same cartridge on an ADAM (+ the SGM's AY)
+
+Only `roms/adam/os7.u2` is needed for `--coleco` (OS-7 is the ColecoVision BIOS, the same
+8K). Controller 1: gamepad, or numpad 8/4/6/2 + numpad 0 / Enter for the two buttons, Alt+digit
+for the keypad. `--joy FILE` plays a joystick script ("FRAME tokens" per line: up down left
+right fire1 fire2 k0-k9 k* k#, `-` = nothing, `p2` = controller 2; the state holds until the
+next line), so a game can be driven headless to the scene you want to look at.
+
+### Profiling
+
+`--prof` watches what a TMS9918A program does that a forgiving emulator lets pass, and prints a
+summary at exit (in the window, running totals go in the title bar):
+
+- **VRAM access spacing.** TI's data manual (Table 2-2) gives the worst-case time the VDP may
+  need before it accepts the next transfer: 8 µs in Graphics I/II during the active display,
+  3.1 µs in Text, 3.5 µs in Multicolor, 2 µs with the screen blanked or in the 4300 µs after
+  the frame interrupt. Transfers closer than that are "risky": they work or lose a byte
+  depending on where the VDP's access windows fall. The report lists the instructions (PC and
+  MegaCart bank) that do it. OTIR (21 cycles = 5.9 µs) during the active display is the classic case.
+- **Sprites per line:** lines with more than four sprites and how many sprite-lines are lost.
+  Sprites parked at Y = 0 are on screen (lines 1-16) and count; 0xD0 ends the table.
+- **Frame time:** the share of each frame from the frame interrupt to the program's idle loop
+  (found automatically: a short backward jump taken again and again without changing memory,
+  or HALT); frames that never reach it are overruns. Also the NMI handler's time.
+- **Races:** an NMI handler that touches the VDP control port between the main program's two
+  address bytes, or moves the address under a transfer in progress; status reads outside the
+  NMI handler that take a set frame flag.
+
+`--prof-csv FILE` writes the same frame by frame, `--prof-log N` prints the first N risky
+accesses, `--prof-from N` (headless) starts at frame N. `--prof-pc FILE` counts Z80 cycles per
+instruction address and bank; `tools/profsym.py` turns that into a per-function table from
+z88dk `.map` files (static functions included) or plain "ADDR name" lists:
+
+    build/adampc --headless --coleco --sgm --cart ff.rom --joy walk.joy --frames 2750 \
+                 --prof-from 2451 --prof-pc walk.pc
+    python tools/profsym.py walk.pc slice78.map 20:ovl_battle.map
+
 ### Porting Applesoft programs: The Oregon Trail (1975)
 
 SmartBASIC follows Applesoft closely, so Apple II BASIC listings run with few changes.
@@ -116,7 +162,9 @@ Z80 routine, its tables fit SmartBASIC's 31 columns. With your copy of the disk:
     build/zextest tests/zex/zexall.com
     tests/regress.sh          # real software end to end (needs the images in media/):
                               # printing, tape STORE, typed-in BASIC, two-drive file
-                              # conversion, format + block mapping of every disk ROM
+                              # conversion, format + block mapping of every disk ROM;
+                              # AY frequencies and the profiler on hand-assembled
+                              # cartridges; Final Fantasy (coleco-ff) to the overworld
 
 ## Documentation
 

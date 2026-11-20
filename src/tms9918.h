@@ -22,6 +22,7 @@ typedef struct TMS9918 {
     int line;                      /* next scanline to render */
     uint8_t fb[VDP_W * VDP_H];     /* palette indices 0..15 */
     uint32_t frame;
+    uint32_t prof_5s_lines, prof_dropped;   /* lines with more than 4 sprites, sprites lost */
 } TMS9918;
 
 extern const uint32_t tms9918_palette[16];   /* 0xRRGGBB */

@@ -28,6 +28,10 @@ Anything not found in documentation is marked **UNKNOWN**.
 | ADAMEM-DOC | ADAMEm distribution web page: the **prose disk-type table only**, no source code (http://www.komkon.org/~dekogel/adamem.html) |
 | ROM-DIS | Hand disassembly of `roms/adam/wp_r80.rom`, `alf @1 rev 57 e3d5.u8`, `os7.u2`, `master rev a 174b.u6` |
 | DS6801 | Motorola MC6801/6803 datasheet. General chip facts, not verified against a copy here. |
+| TMS-DM | *TMS9918A/TMS9928A/TMS9929A Video Display Processors Data Manual*, Texas Instruments, Nov 1982 (copy: git.applefritter.com, Apple-1-Tools/apple1-videocard-lib, `docs/`). Sections 2.1.5, 2.3, Table 2-2. |
+| DS-AY | General Instrument AY-3-8910 data sheet: register map and frequency formulas. General chip facts, not verified against a copy here. |
+| SGM | Super Game Module port map as summarised from AtariAge forum threads ("CV memory map and programming info", "Super Game Module technical forum"); the pages themselves refuse automated reads, so only search summaries were seen. Cross-checked with the init code of the coleco-ff port (`crt/sgm_megacart_crt0.asm`). |
+| MC | Opcode MegaCart bank switching as described in the coleco-ff port's startup code and comments. |
 
 ---
 
@@ -546,6 +550,18 @@ OS-7 reset: `LD SP,73B9h` / `JP 006Eh` [ROM-DIS] (sure).
 | Expansion Module #3 | The ColecoVision supplies the CPU board. Address bus buffered (ADDRBUFEN), data bus buffered (245EN). No composite video out. | TRM 2.2.4 (2.4) | sure |
 
 ---
+
+## 6.1 ColecoVision, Super Game Module, MegaCart, VDP timing
+
+| Item | Fact | Src | Conf |
+|---|---|---|---|
+| ColecoVision map | 0000-1FFF BIOS (same 8K as the ADAM's OS-7, identical dump), 2000-5FFF expansion, 6000-7FFF 1K RAM mirrored, 8000-FFFF cartridge. I/O: 80-9F keypad mode, A0-BF VDP, C0-DF joystick mode, E0-FF PSG write / controllers read. | BIOS identity: MD5 of the dumps compared here; the rest is the well-known ColecoVision map, not re-checked against a document | sure (BIOS), likely (rest) |
+| SGM sound | AY-3-8910: 0x50 register select, 0x51 data write, 0x52 data read. Clock 1.789772 MHz (the coleco-ff port computes its periods with it). | SGM | likely |
+| SGM RAM | Port 0x53 bit 0 = 1: 24K RAM at 0x2000-0x7FFF (off at power on). Port 0x7F bit 1 = 0 (value 0x0D): 8K RAM replaces the BIOS at 0x0000; 0x0F puts the BIOS back. On an ADAM the computer's own RAM serves (port 0x7F is the ADAM's memory map: 0x0D = 32K RAM + cartridge). Software checks for an ADAM before writing 0x53. | SGM | likely |
+| MegaCart | 16K banks. The last bank is fixed at 0x8000-0xBFFF (it holds the AA55/55AA header). Reading 0xFFC0+N selects bank N for 0xC000-0xFFFF; the read returns the byte of the current bank. At power on the window shows the last bank too. | MC | likely |
+| AY tone/noise/envelope | Tone fT = fclock / (16 TP), 12-bit TP. Noise fN = fclock / (16 NP), 5-bit NP, 17-bit shift register. Envelope: 16 steps per ramp, fE = fclock / (256 EP); R13 = CONT ATT ALT HOLD, a write restarts it. Mixer R7: bits 0-2 tone off, 3-5 noise off, 6-7 I/O port direction. | DS-AY | likely (measured in tests/tools/aytest.py: 440.0 Hz for TP 254, 13.5 Hz envelope triangle for EP 256) |
+| VDP access timing | After a transfer request the VDP needs about 2 µs, then waits for a CPU access window. Total worst case: Graphics I/II active display 2-8 µs (windows every 16 memory cycles of 372 ns, wait 0-5.95 µs); Text 2-3.1 µs; Multicolor 2-3.5 µs; screen blanked (R1 bit 6 = 0) or within 4300 µs after the interrupt: 2 µs. Read: about 8 µs to fetch the byte after the last transfer, 2 µs after the address setup. | TMS-DM 2.1.5, Table 2-2 | sure |
+| VDP status | F is set at the end of the last active line and cleared by a status read; "asynchronous reads will cause the frame flag (F) bit to be reset and therefore missed". 5S is set on a line with five or more sprites only while F = 0. Transparent and partly off-screen sprites count for coincidence; sprites after the 0xD0 terminator do not. | TMS-DM 2.3 | sure |
 
 ## 7. Practical emulation notes
 

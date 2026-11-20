@@ -3,9 +3,11 @@
 Contesto: [docs/RECON.md](docs/RECON.md) (ricognizione dei firmware),
 [docs/hardware_research.md](docs/hardware_research.md) (documentazione pubblica), [README.md](README.md).
 
-**Stato (fine sessione 2, 2026-11-19 sera; prossimo: SGM + profilazione VDP)**: tutto l'hardware dell'ADAM è emulato a basso livello
+**Stato (fine sessione 3, 2026-11-20)**: tutto l'hardware dell'ADAM è emulato a basso livello
 (Z80, VDP, PSG, master, tastiera, Digital Data Pack, due floppy con tutte le ROM di controller note,
-stampante con pagina PNG e suono, espansione di memoria). Gira tutto il software provato (elenco in
+stampante con pagina PNG e suono, espansione di memoria). In più: modalità ColecoVision, Super Game
+Module, MegaCart e un profilatore VDP/tempo di frame; FF1 (coleco-ff slice78) gira fino
+all'overworld sia su ColecoVision+SGM sia su ADAM. Gira tutto il software provato (elenco in
 docs/RECON.md, "Software provato"). Immagini di test in `media/` (usare sempre copie: l'emulatore
 riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
 
@@ -92,6 +94,53 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
 - Il "tasto mangiato" della sessione 1 era tempismo dei miei test (SmartBASIC pronto verso il
   frame 3000-3400), non un difetto.
 
+## Sessione del 2026-11-20 (sessione 3): Super Game Module, MegaCart, profilatore VDP
+
+- **Modalità ColecoVision** (`--coleco`): stesso Z80/VDP/PSG, 1K di RAM a specchio a 6000-7FFF,
+  niente AdamNet. Il BIOS ColecoVision e l'OS-7 dell'ADAM sono lo stesso file (stesso MD5), quindi
+  basta `roms/adam/os7.u2`.
+- **Super Game Module** (`--sgm`): AY-3-8910 scritto da zero dalle formule del datasheet GI
+  (`src/ay8910.c`: toni, rumore a 17 bit, inviluppo con CONT/ATT/ALT/HOLD), clock 1,789772 MHz;
+  porte 0x50/0x51/0x52. Su ColecoVision anche la RAM: porta 0x53 bit 0 (24K a 2000-7FFF) e 0x7F
+  bit 1 (8K al posto del BIOS). Sull'ADAM solo l'AY: la RAM c'è già e la 0x7F è la mappa dell'ADAM.
+  Verifica senza software altrui: `tests/tools/aytest.py` (cartuccia assemblata a mano) misura
+  440,0 Hz per TP=254 (atteso 440,4) e 13,5 Hz per il triangolo dell'inviluppo con EP=256 (13,65).
+- **MegaCart**: banchi da 16K, l'ultimo fisso a 8000, la lettura di FFC0+N mappa il banco N a C000,
+  all'accensione la finestra mostra l'ultimo banco (come scritto nel crt0 di coleco-ff).
+- **Profilatore** (`--prof`, `--prof-csv`, `--prof-log`, `--prof-from`, `--prof-pc` +
+  `tools/profsym.py`), numeri dal Data Manual TI del 1982 (Tabella 2-2): tra due trasferimenti
+  VRAM servono fino a 8 µs in Graphics I/II con il display attivo, 3,1 in Text, 3,5 in Multicolor,
+  2 µs con lo schermo spento o nei 4300 µs dopo l'interrupt. Sotto 2 µs è "hard" (con uno Z80 a
+  3,58 MHz non succede: l'OUT più veloce costa 11 cicli = 3,07 µs), sotto il limite del modo è
+  "risky". Poi sprite oltre il quarto per riga, tempo di frame fino al ciclo d'attesa (trovato da
+  solo: salto corto all'indietro ripetuto senza cambiare la memoria, o HALT), durata dell'NMI,
+  corse NMI/VDP (registro indirizzo a metà, indirizzo spostato sotto un trasferimento), letture
+  dello status fuori dall'NMI che si prendono il flag F. Verifica: `tests/tools/vdptest.py`.
+- Correzione al VDP dal datasheet (2.3.3): il flag 5S si accende solo se F = 0.
+- `--joy FILE` (script del joystick), `--dump-vram`, `--trace-ay`. Tre prove nuove in
+  `tests/regress.sh` (sgm_ay, vdp_prof, ff_sgm), 16/16 passano.
+- **FF1 coleco-ff slice78 (MegaCart 512K)**: leggenda, scelta delle classi, menu, overworld,
+  camminata, su ColecoVision+SGM e su ADAM (schermate identiche). Lo script del joystick
+  (`tests/media/ff_overworld.joy`) rifà gli input di `mame_drive.lua`. Cosa dice il profilatore:
+  - **sprite**: in leggenda e overworld gli sprite non usati sono parcheggiati in parte a Y=0xC7
+    (fuori schermo, giusto) e in parte a **Y=0x00, che sono le righe 1-16**: 13 sprite trasparenti
+    lassù, 5S acceso a ogni frame. Oggi non si vede nulla, ma uno sprite vero nelle prime 16 righe
+    oltre il quarto sparirebbe. Rimedio: 0xD0 nella Y del primo sprite libero (terminatore).
+    Per il kit NES -> Coleco: lo sprite "nascosto" del NES (Y >= 0xEF) va tradotto in 0xD0 o in
+    0xC0-0xCF, mai in 0.
+  - **VRAM**: un solo punto "risky", `__tms9918_setup_mode2_pattern` di z88dk (PC BBB7): ciclo
+    OUT/INC/JR da 27 cicli = 7,54 µs con lo schermo acceso, sotto gli 8 µs del caso peggiore.
+    Succede al cambio di modo, ~1000 byte. Nessuna corsa NMI/VDP.
+  - **tempo**: leggenda 2,7% del frame; l'NMI (audio) costa fino a ~1,1 ms; un passo in overworld
+    tiene la CPU piena per ~28 frame. Dove va il tempo durante la camminata (`--prof-pc` +
+    profsym): 35% attesa del vblank, 22% `redraw_ow_view_from_banks`, 20% `ow_read_macro`, ~10%
+    negli helper di sccz80 per lo stack (`l_gint*`), 2,4% `mc_select_bank`.
+  - **transizioni**: aprendo/chiudendo il menu lo schermo resta acceso e per qualche frame la
+    mappa si vede con le tile del font (la pattern table cambia prima della name table).
+- Insidie di questa sessione: le funzioni `static` di z88dk sono simboli *locali* nella .map
+  (all'inizio profsym attribuiva tutto a `svc_wait_vblank`: 77% invece di 35%); la .map dice però
+  a quale funzione C appartiene ogni simbolo (`file.c::funzione::`), ed è quello che si usa ora.
+
 ## Domande aperte
 
 - **GAME sul disco SmartBASIC**: "?NEXT without FOR in 100"; il blocco 42 contiene un altro
@@ -105,13 +154,26 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
   reale. Se ricompare, guardare prima i tempi (DMA, wait state) che la logica.
 - Contenuto dei data pack vergini Coleco: ipotizzato "inizializzati EOS" (vedi sopra), da
   confermare con un'immagine di un pack nuovo.
+- **SGM**: le pagine dei forum (AtariAge) rifiutano la lettura automatica, i dettagli delle porte
+  vengono da riassunti di ricerca + il crt0 di coleco-ff. Da confermare su un documento Opcode:
+  stato della 0x7F all'accensione, comportamento esatto sull'ADAM, se la RAM SGM copre anche
+  6000-7FFF (qui sì).
+- **Tabella dei volumi dell'AY**: passo di ~3 dB (16 livelli), non misurata; idem il rapporto
+  di livello AY/SN76489 sul modulo vero.
+- **Finestre d'accesso del VDP dentro la riga**: il profilatore usa i casi peggiori del datasheet,
+  non la posizione esatta degli slot. Un ciclo da 27 cicli può funzionare sempre su una console
+  vera; per dire "si perde il byte" servirebbe il modello degli slot (o misure).
 
 ## Prossimi passi
 
-**Prima di tutto (deciso il 2026-11-19): Super Game Module + profilazione VDP**, vedi la sezione
-"SGM e FF1" più sotto. Motivo: l'hardware ADAM è completo, e il kit NES -> Coleco (progetto
-separato, aperto in parallelo) avrà bisogno di un banco di prova che segnali ciò che MAME non
-dice: accessi alla VRAM troppo ravvicinati, sprite persi per riga, tempo di frame consumato.
+**Fatto nella sessione 3: Super Game Module + profilazione VDP** (sopra). Seguiti possibili:
+- modello degli slot d'accesso del VDP dentro la riga (passa da "risky" a "perso davvero"),
+  insieme al punto 3 qui sotto (timing VDP intra-linea);
+- profilatore nella finestra: grafico del tempo di frame sovrapposto, righe con sprite persi
+  evidenziate;
+- altre scene di FF1 (battaglia, città, ponte) con script `--joy` presi dagli altri
+  `mame_drive_*.lua`;
+- l'ADAM come target del kit NES -> Coleco: con `--sgm` FF1 gira già identico.
 
 Poi le rifiniture, nessuna bloccante:
 
@@ -133,17 +195,12 @@ Risorse: `media/ADAM CP-M 2.2 Source (2025-10-01) (Nino Brunori)/` = sorgente ri
 CP/M ADAM (utile per il terminale a 80 colonne virtuali e i driver); `docs/dis/` = disassemblati
 dei 6801 (`tools/gendis.sh`); `build/dz80` per lo Z80.
 
-## SGM e FF1 (prossimo lavoro), poi il kit Apple II
+## SGM e FF1 (fatto nella sessione 3), poi il kit Apple II
 
-- **Super Game Module** (AY-3-8910, RAM extra; la sua porta di mappatura RAM coincide con la
-  0x7F dell'ADAM, da verificare sulla documentazione) + **profilazione VDP**: violazioni dei
-  tempi di accesso alla VRAM, sprite persi per linea, tempo per frame.
-- Banco di prova: il porting di Final Fantasy (NES) su ColecoVision SGM in
-  `D:\Homebrew5\ColecoFF`, molte slice compilate; la più recente dovrebbe essere un collage
-  delle altre, quindi la più impegnativa. Farla girare in modalità ColecoVision+SGM ed
-  eventualmente in modalità ADAM (memoria via 0x7F, audio di ripiego sull'SN76489).
-  È anche l'oracolo del futuro kit game-agnostic NES -> Coleco SGM, che potrebbe avere
-  l'ADAM come target quasi gratis (stessi VDP, PSG, Z80; più RAM; manca solo l'AY).
+- SGM, MegaCart, modalità ColecoVision e profilatore: fatti (vedi la sessione 3). FF1 slice78
+  (`media/ColecoFF slice78/`, copia della build in `D:\Homebrew5\ColecoFF\build`) è il banco
+  di prova e l'oracolo del futuro kit game-agnostic NES -> Coleco SGM; l'ADAM come target è
+  quasi gratis (stessi VDP, PSG, Z80; più RAM; l'AY con l'SGM o l'ADAM Sound Enhancer).
 - **Dopo SGM/FF1: kit game-agnostic Apple II -> ADAM, banco di prova Wizardry I.** BYOA: il repo
   "Wizardry Proving Grounds v3.2" (sorgente ricostruito, senza licenza, derivato da un'opera
   altrui) non si usa. Stessa forma di JagFF4: traduttore + ponte hardware + profilo facoltativo.

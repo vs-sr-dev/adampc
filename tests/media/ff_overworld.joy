@@ -1,0 +1,250 @@
+# FF1 slice78: through intro, menus and class select, then walk right (as mame_drive.lua)
+700 fire1 fire2
+705 -
+716 fire1 fire2
+721 -
+732 fire1 fire2
+737 -
+748 fire1 fire2
+753 -
+764 fire1 fire2
+769 -
+780 fire1 fire2
+785 -
+796 fire1 fire2
+801 -
+812 fire1 fire2
+817 -
+828 fire1 fire2
+833 -
+844 fire1 fire2
+849 -
+860 fire1 fire2
+865 -
+876 fire1 fire2
+881 -
+892 fire1 fire2
+897 -
+908 fire1 fire2
+913 -
+924 fire1 fire2
+929 -
+940 fire1 fire2
+945 -
+956 fire1 fire2
+961 -
+972 fire1 fire2
+977 -
+988 fire1 fire2
+993 -
+1004 fire1 fire2
+1009 -
+1020 fire1 fire2
+1025 -
+1036 fire1 fire2
+1041 -
+1052 fire1 fire2
+1057 -
+1068 fire1 fire2
+1073 -
+1084 fire1 fire2
+1089 -
+1100 fire1 fire2
+1105 -
+1116 fire1 fire2
+1121 -
+1132 fire1 fire2
+1137 -
+1148 fire1 fire2
+1153 -
+1164 fire1 fire2
+1169 -
+1180 fire1 fire2
+1185 -
+1196 fire1 fire2
+1201 -
+1212 fire1 fire2
+1217 -
+1228 fire1 fire2
+1233 -
+1244 fire1 fire2
+1249 -
+1260 fire1 fire2
+1265 -
+1276 fire1 fire2
+1281 -
+1292 fire1 fire2
+1297 -
+1308 fire1 fire2
+1313 -
+1324 fire1 fire2
+1329 -
+1340 fire1 fire2
+1345 -
+1356 fire1 fire2
+1361 -
+1372 fire1 fire2
+1377 -
+1388 fire1 fire2
+1393 -
+1404 fire1 fire2
+1409 -
+1420 fire1 fire2
+1425 -
+1436 fire1 fire2
+1441 -
+1452 fire1 fire2
+1457 -
+1468 fire1 fire2
+1473 -
+1484 fire1 fire2
+1489 -
+1500 fire1 fire2
+1505 -
+1516 fire1 fire2
+1521 -
+1532 fire1 fire2
+1537 -
+1548 fire1 fire2
+1553 -
+1564 fire1 fire2
+1569 -
+1580 fire1 fire2
+1585 -
+1596 fire1 fire2
+1601 -
+1612 fire1 fire2
+1617 -
+1628 fire1 fire2
+1633 -
+1644 fire1 fire2
+1649 -
+1660 fire1 fire2
+1665 -
+1676 fire1 fire2
+1681 -
+1692 fire1 fire2
+1697 -
+1708 fire1 fire2
+1713 -
+1724 fire1 fire2
+1729 -
+1740 fire1 fire2
+1745 -
+1756 fire1 fire2
+1761 -
+1772 fire1 fire2
+1777 -
+1788 fire1 fire2
+1793 -
+1804 fire1 fire2
+1809 -
+1820 fire1 fire2
+1825 -
+1836 fire1 fire2
+1841 -
+1852 fire1 fire2
+1857 -
+1868 fire1 fire2
+1873 -
+1884 fire1 fire2
+1889 -
+1900 fire1 fire2
+1905 -
+1916 fire1 fire2
+1921 -
+1932 fire1 fire2
+1937 -
+1948 fire1 fire2
+1953 -
+1964 fire1 fire2
+1969 -
+1980 fire1 fire2
+1985 -
+1996 fire1 fire2
+2001 -
+2012 fire1 fire2
+2017 -
+2028 fire1 fire2
+2033 -
+2044 fire1 fire2
+2049 -
+2060 fire1 fire2
+2065 -
+2076 fire1 fire2
+2081 -
+2092 fire1 fire2
+2097 -
+2108 fire1 fire2
+2113 -
+2124 fire1 fire2
+2129 -
+2140 fire1 fire2
+2145 -
+2156 fire1 fire2
+2161 -
+2172 fire1 fire2
+2177 -
+2188 fire1 fire2
+2193 -
+2200 -
+2451 right
+2456 -
+2461 right
+2466 -
+2471 right
+2476 -
+2481 right
+2486 -
+2491 right
+2496 -
+2501 right
+2506 -
+2511 right
+2516 -
+2521 right
+2526 -
+2531 right
+2536 -
+2541 right
+2546 -
+2551 right
+2556 -
+2561 right
+2566 -
+2571 right
+2576 -
+2581 right
+2586 -
+2591 right
+2596 -
+2601 right
+2606 -
+2611 right
+2616 -
+2621 right
+2626 -
+2631 right
+2636 -
+2641 right
+2646 -
+2651 right
+2656 -
+2661 right
+2666 -
+2671 right
+2676 -
+2681 right
+2686 -
+2691 right
+2696 -
+2701 right
+2706 -
+2711 right
+2716 -
+2721 right
+2726 -
+2731 right
+2736 -
+2741 right
+2746 -

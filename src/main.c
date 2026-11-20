@@ -18,7 +18,19 @@
  *     --no-printer-sound  do not mix the printer mechanism noise into the audio
  *     --xram KB         memory expander: 64K, or more in 64K banks (port 0x42)
  *     --fdc-rom FILE    another 4K disk controller ROM for drive 1 (--fdc-rom2: drive 2)
- *     --cart FILE       ColecoVision cartridge: boots with a game reset (OS-7 + cartridge)
+ *     --cart FILE       ColecoVision cartridge: boots with a game reset (OS-7 + cartridge);
+ *                       larger than 32K = MegaCart (16K banks, reading 0xFFC0+N selects bank N)
+ *     --coleco          ColecoVision instead of an ADAM (needs --cart; only roms/adam/os7.u2)
+ *     --sgm             Super Game Module: AY-3-8910 (ADAM and ColecoVision) + 32K RAM (ColecoVision)
+ *     --joy FILE        joystick script: "FRAME tokens" lines (see typer.h)
+ *     --prof            VDP / frame-time profile, summary at exit (vdpprof.h)
+ *     --prof-csv FILE   the profile frame by frame (implies --prof)
+ *     --prof-log N      print the first N too-early VRAM accesses one by one (implies --prof)
+ *     --prof-pc FILE    Z80 cycles per instruction address (and MegaCart bank), for
+ *                       tools/profsym.py (implies --prof)
+ *     --prof-from N     headless: profile from frame N on (e.g. only a scene the script reaches)
+ *     --trace-ay        log AY-3-8910 (SGM) register writes
+ *     --dump-ram FILE   64K RAM image at exit (--dump-vram FILE: 16K VRAM + the 8 VDP registers)
  *     --trace-net       log every AdamNet byte
  */
 #include <stdio.h>
@@ -77,6 +89,57 @@ void typer_step(Adam *a, Typer *t)
     }
 }
 
+/* ---------------------------------------------------------- joystick script */
+int joy_script_load(JoyScript *s, const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    char line[512];
+    int cap = 0, ln = 0;
+    s->n = s->next = 0;
+    while (fgets(line, sizeof line, f)) {
+        ln++;
+        char *h = strchr(line, '#');
+        if (h) *h = 0;
+        char *tok = strtok(line, " \t\r\n");
+        if (!tok) continue;
+        JoyEvent e = { atoi(tok), 0, 0, -1 };
+        while ((tok = strtok(NULL, " \t\r\n"))) {
+            if (!strcmp(tok, "p1")) e.player = 0;
+            else if (!strcmp(tok, "p2")) e.player = 1;
+            else if (!strcmp(tok, "up")) e.joy |= 1;
+            else if (!strcmp(tok, "right")) e.joy |= 2;
+            else if (!strcmp(tok, "down")) e.joy |= 4;
+            else if (!strcmp(tok, "left")) e.joy |= 8;
+            else if (!strcmp(tok, "fire1")) e.joy |= 0x10;
+            else if (!strcmp(tok, "fire2")) e.joy |= 0x20;
+            else if (tok[0] == 'k' && tok[1] >= '0' && tok[1] <= '9' && !tok[2]) e.keypad = (int8_t)(tok[1] - '0');
+            else if (!strcmp(tok, "k*")) e.keypad = 10;
+            else if (!strcmp(tok, "k#")) e.keypad = 11;
+            else if (!strcmp(tok, "-")) { }
+            else { fprintf(stderr, "%s:%d: unknown token '%s'\n", path, ln, tok); fclose(f); return 0; }
+        }
+        if (s->n == cap) {
+            cap = cap ? cap * 2 : 64;
+            JoyEvent *ne = realloc(s->ev, (size_t)cap * sizeof *ne);
+            if (!ne) { fclose(f); return 0; }
+            s->ev = ne;
+        }
+        s->ev[s->n++] = e;
+    }
+    fclose(f);
+    return 1;
+}
+
+void joy_script_step(Adam *a, JoyScript *s, int frame)
+{
+    while (s->next < s->n && s->ev[s->next].frame <= frame) {
+        const JoyEvent *e = &s->ev[s->next++];
+        a->joy[e->player] = e->joy;
+        a->keypad[e->player] = e->keypad;
+    }
+}
+
 static char *read_text_file(const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -130,8 +193,18 @@ static int create_eos_media(const char *path, int is_disk)
     return 1;
 }
 
+static void prof_finish(Adam *a, const char *pc_path)
+{
+    vdpprof_summary(&a->prof, stderr);
+    if (a->prof.csv) fclose(a->prof.csv);
+    if (pc_path) {
+        if (vdpprof_write_pc(&a->prof, pc_path, a->cart_banks > 2)) fprintf(stderr, "  cycles per PC written to %s\n", pc_path);
+        else fprintf(stderr, "cannot write %s\n", pc_path);
+    }
+}
+
 #ifdef ADAM_SDL
-int run_sdl(Adam *a, Typer *t);
+int run_sdl(Adam *a, Typer *t, JoyScript *js);
 #endif
 
 int main(int argc, char **argv)
@@ -140,8 +213,11 @@ int main(int argc, char **argv)
     int ddp_new = 0, disk_new = 0, line_wait = 30, no_prn_sound = 0, xram_kb = 0;
     const char *type_file = NULL, *type_after = NULL, *fdcrom[2] = { NULL, NULL };
     int headless = 0, frames = 300, type_at = 240, shots = 0;
-    const char *dumpram = NULL;
+    const char *dumpram = NULL, *dumpvram = NULL;
     int watch = -1, trz_from = -1, trz_to = -1;
+    int coleco = 0, sgm = 0, prof = 0, prof_log = 0;
+    const char *joy = NULL, *prof_csv = NULL, *prof_pc = NULL;
+    int prof_from = 0;
     for (int i = 1; i < argc; i++) {
         const char *s = argv[i];
         const char *nx = i + 1 < argc ? argv[i + 1] : NULL;
@@ -168,7 +244,9 @@ int main(int argc, char **argv)
         else if (!strcmp(s, "--trace-prn")) adam.printer.trace = 1;
         else if (!strcmp(s, "--no-printer-sound")) no_prn_sound = 1;
         else if (!strcmp(s, "--dump-ram") && nx) { dumpram = nx; i++; }
+        else if (!strcmp(s, "--dump-vram") && nx) { dumpvram = nx; i++; }
         else if (!strcmp(s, "--trace-eos")) adam.trace_eos = 1;
+        else if (!strcmp(s, "--trace-ay")) adam.trace_ay = 1;
         else if (!strcmp(s, "--trace-z80") && nx && i + 2 < argc) { trz_from = atoi(nx); trz_to = atoi(argv[i + 2]); i += 2; }
         else if (!strcmp(s, "--watch") && nx) { watch = (int)strtol(nx, NULL, 16); i++; }
         else if (!strcmp(s, "--ddp-new")) ddp_new = 1;
@@ -176,6 +254,14 @@ int main(int argc, char **argv)
         else if (!strcmp(s, "--trace-ddp")) ddp_trace = 1;
         else if (!strcmp(s, "--trace-ddp2")) ddp_trace = 2;
         else if (!strcmp(s, "--cart") && nx) { cart = nx; i++; }
+        else if (!strcmp(s, "--coleco")) coleco = 1;
+        else if (!strcmp(s, "--sgm")) sgm = 1;
+        else if (!strcmp(s, "--joy") && nx) { joy = nx; i++; }
+        else if (!strcmp(s, "--prof")) prof = 1;
+        else if (!strcmp(s, "--prof-csv") && nx) { prof_csv = nx; prof = 1; i++; }
+        else if (!strcmp(s, "--prof-log") && nx) { prof_log = atoi(nx); prof = 1; i++; }
+        else if (!strcmp(s, "--prof-pc") && nx) { prof_pc = nx; prof = 1; i++; }
+        else if (!strcmp(s, "--prof-from") && nx) { prof_from = atoi(nx); prof = 1; i++; }
         else if (!strcmp(s, "--trace-net")) adam.net.trace = 1;
         else { fprintf(stderr, "unknown option %s\n", s); return 2; }
     }
@@ -185,7 +271,20 @@ int main(int argc, char **argv)
     adam.wd[0].trace = adam.wd[1].trace = wdtrace;
     adam.watch = watch;
     if (no_prn_sound) adam.printer.sound = 0;
-    if (!adam_load_roms(&adam, romdir)) return 1;
+    if (coleco && !cart) { fprintf(stderr, "--coleco needs --cart\n"); return 2; }
+    adam.coleco = coleco;
+    adam.sgm = sgm;
+    int roms = adam_load_roms(&adam, romdir);
+    if (roms == 0 || (roms < 0 && !coleco)) return 1;
+    if (prof) {
+        if (prof_csv && !(adam.prof.csv = fopen(prof_csv, "w"))) { fprintf(stderr, "cannot write %s\n", prof_csv); return 1; }
+        adam.prof.log_left = prof_log;
+        if (prof_pc && !(adam.prof.pc_cycles = calloc(VP_PC_SLOTS, sizeof(uint32_t)))) return 1;
+        vdpprof_init(&adam.prof);
+        if (headless && prof_from > 0) adam.prof.enabled = 0;     /* switched on at frame prof_from */
+    }
+    JoyScript joys = { 0 };
+    if (joy && !joy_script_load(&joys, joy)) { fprintf(stderr, "cannot load joystick script %s\n", joy); return 1; }
     if (xram_kb && !adam_set_xram(&adam, xram_kb)) { fprintf(stderr, "--xram: 64, 128, ... 16384 (KB)\n"); return 1; }
     for (int d = 0; d < 2; d++)
         if (fdcrom[d] && !adam_set_fdc_rom(&adam, d, fdcrom[d])) { fprintf(stderr, "cannot load 4K ROM %s\n", fdcrom[d]); return 1; }
@@ -210,13 +309,20 @@ int main(int argc, char **argv)
         if (!typer.then) { fprintf(stderr, "cannot read %s\n", type_file); return 1; }
     }
 #ifdef ADAM_SDL
-    if (!headless) { int r = run_sdl(&adam, &typer); adam_shutdown(&adam); return r; }
+    if (!headless) {
+        int r = run_sdl(&adam, &typer, joy ? &joys : NULL);
+        adam_shutdown(&adam);
+        if (prof) prof_finish(&adam, prof_pc);
+        return r;
+    }
 #endif
     (void)headless;
     int16_t *snd = wav ? malloc((size_t)frames * 2048 * 2) : NULL;
     size_t nsnd = 0;
     for (int f = 0; f < frames; f++) {
         if (f >= type_at) typer_step(&adam, &typer);
+        joy_script_step(&adam, &joys, f);
+        if (prof && f == prof_from && !adam.prof.enabled) adam.prof.enabled = 1;
         adam.trace_z80 = trz_from >= 0 && f >= trz_from && f <= trz_to;
         adam_run_frame(&adam);
         if (snd) { memcpy(snd + nsnd, adam.audio, (size_t)adam.audio_n * 2); nsnd += (size_t)adam.audio_n; }
@@ -235,12 +341,25 @@ int main(int argc, char **argv)
         write_wav(wav, snd, nsnd);
         free(snd);
     }
-    fprintf(stderr, "ran %d frames, Z80 PC=%04X map=%X, master PC=%04X, kbd PC=%04X, tape PC=%04X\n",
-            frames, adam.z80.pc.w, adam.memmap, adam.master.cpu.pc, adam.kbd.cpu.pc, adam.tape.cpu.pc);
+    if (coleco)
+        fprintf(stderr, "ran %d frames (ColecoVision%s), Z80 PC=%04X%s\n", frames, sgm ? " + SGM" : "", adam.z80.pc.w,
+                adam.cart_banks > 2 ? " (MegaCart)" : "");
+    else
+        fprintf(stderr, "ran %d frames, Z80 PC=%04X map=%X, master PC=%04X, kbd PC=%04X, tape PC=%04X\n",
+                frames, adam.z80.pc.w, adam.memmap, adam.master.cpu.pc, adam.kbd.cpu.pc, adam.tape.cpu.pc);
+    if (prof) prof_finish(&adam, prof_pc);
     adam_shutdown(&adam);
     if (dumpram) {
         FILE *f = fopen(dumpram, "wb");
-        if (f) { fwrite(adam.ram, 1, sizeof adam.ram, f); fclose(f); }
+        /* ColecoVision: the 64K the Z80 sees (reading 0xFFC0-0xFFFF would switch MegaCart banks) */
+        if (f && coleco) {
+            for (int i = 0; i < 0x10000; i++) fputc(i >= 0x8000 ? 0xFF : adam.z80.read(&adam, (uint16_t)i), f);
+            fclose(f);
+        } else if (f) { fwrite(adam.ram, 1, sizeof adam.ram, f); fclose(f); }
+    }
+    if (dumpvram) {
+        FILE *f = fopen(dumpvram, "wb");   /* 16K of VRAM, then the 8 registers */
+        if (f) { fwrite(adam.vdp.vram, 1, sizeof adam.vdp.vram, f); fwrite(adam.vdp.reg, 1, 8, f); fclose(f); }
     }
     if (png) {
         static uint8_t rgb[VDP_W * VDP_H * 3];

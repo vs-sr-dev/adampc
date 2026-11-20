@@ -10,7 +10,7 @@ endif()
 option(ADAM_SDL "Build the SDL2 frontend (window, keyboard, audio)" ON)
 
 set(CORE_SOURCES
-  src/adam.c src/eosvol.c src/adamnet.c src/ddp.c src/wd2793.c src/printer.c src/z80.c src/z80dis.c src/m6801.c src/tms9918.c src/sn76489.c src/png.c)
+  src/adam.c src/ay8910.c src/vdpprof.c src/eosvol.c src/adamnet.c src/ddp.c src/wd2793.c src/printer.c src/z80.c src/z80dis.c src/m6801.c src/tms9918.c src/sn76489.c src/png.c)
 
 add_executable(adampc src/main.c src/sdl.c ${CORE_SOURCES})
 target_compile_options(adampc PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation)

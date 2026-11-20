@@ -85,6 +85,44 @@ floppy() {   # name rom bytes blocks fmtblock spt layout
     r=$($PY tests/tools/findmk.py $o/d2.dsk $spt $sides | $PY tests/tools/expect_map.py $layout)
     [ $? = 0 ] && pass fdc_$name || fail fdc_$name "$r"
 }
+# Super Game Module AY-3-8910: tone and envelope frequencies from a hand-assembled cartridge
+t_sgm_ay() {
+    local o=$OUT/sgm_ay; mkdir -p $o
+    $PY tests/tools/aytest.py rom $o/ay.rom
+    $EMU --headless --coleco --sgm --cart $o/ay.rom --frames 480 --wav $o/ay.wav >/dev/null 2>&1
+    local r; r=$($PY tests/tools/aytest.py check $o/ay.wav)
+    [ $? = 0 ] && pass sgm_ay || fail sgm_ay "$r"
+}
+
+# VDP profiler: OTIR in the active display, five sprites on a line, idle loop (see the script)
+t_vdp_prof() {
+    local o=$OUT/vdp_prof; mkdir -p $o
+    $PY tests/tools/vdptest.py rom $o/vdp.rom
+    $EMU --headless --coleco --cart $o/vdp.rom --frames 300 --prof-csv $o/p.csv >/dev/null 2>&1
+    local r; r=$($PY tests/tools/vdptest.py check $o/p.csv)
+    [ $? = 0 ] && pass vdp_prof || fail vdp_prof "$r"
+}
+
+# Final Fantasy on ColecoVision + SGM + MegaCart 512K (the user's own build of the coleco-ff
+# port, BYOA): through the legend, class select and menus to the overworld, on a ColecoVision
+# and on an ADAM; the party (4 layered sprites) must stand at the same place in both
+FF="media/ColecoFF slice78/slice78_mc512.rom"
+t_ff_sgm() {
+    local o=$OUT/ff_sgm; mkdir -p $o
+    [ -f "$FF" ] || { echo "SKIP ff_sgm: no $FF"; return; }
+    $EMU --headless --coleco --sgm --cart "$FF" --joy tests/media/ff_overworld.joy --frames 2800 --dump-vram $o/cv.bin >/dev/null 2>&1
+    $EMU --headless --sgm --cart "$FF" --joy tests/media/ff_overworld.joy --frames 2800 --dump-vram $o/adam.bin >/dev/null 2>&1
+    local r
+    r=$($PY -c "
+import sys
+for f in sys.argv[1:]:
+    d=open(f,'rb').read(); sat=(d[0x4005]&0x7F)<<7
+    party=[d[sat+4*i] for i in range(4)]
+    if party!=[0x57]*4: print(f, 'party sprites at', party); sys.exit(1)
+" $o/cv.bin $o/adam.bin)
+    [ $? = 0 ] && pass ff_sgm || fail ff_sgm "$r"
+}
+
 R=roms/adam_fdc
 t_fdc_std()     { floppy std     "$R/adam disk u10 ad 31 rev a 09-27-84.u10" 163840  160  FACE 8  std; }
 t_fdc_320ta()   { floppy 320ta   "$R/320ta.u10"                            327680  320  FACE 8  320; }
@@ -95,10 +133,10 @@ t_fdc_a720()    { floppy a720    "$R/a720dipi 7607 mmsg =c= 1988.u10"      73728
 t_fdc_1440hd()  { floppy 1440hd  "$R/1440k micro innovations hd-dd.u10"    1474560 1440 FACE 18 1440; }
 t_fdc_1440dd()  { floppy 1440dd  "$R/1440k micro innovations hd-dd.u10"    737280  720  FACF 9  720; }
 
-ALL="sb_devices sw_print tape_store sb_typein filter fdc_std fdc_320ta fdc_dbl fdc_pmhd fdc_fast fdc_a720 fdc_1440hd fdc_1440dd"
+ALL="sgm_ay vdp_prof ff_sgm sb_devices sw_print tape_store sb_typein filter fdc_std fdc_320ta fdc_dbl fdc_pmhd fdc_fast fdc_a720 fdc_1440hd fdc_1440dd"
 [ $# -gt 0 ] && ALL="$*"
 for t in $ALL; do t_$t > $OUT/$t.result 2>&1 & done
 wait
 status=0
-for t in $ALL; do cat $OUT/$t.result; grep -q "^PASS" $OUT/$t.result || status=1; done
+for t in $ALL; do cat $OUT/$t.result; grep -q "^PASS\|^SKIP" $OUT/$t.result || status=1; done
 exit $status

@@ -70,7 +70,7 @@ static void screenshot(Adam *a)
     if (png_write_rgb(name, rgb, VDP_W, VDP_H)) fprintf(stderr, "saved %s\n", name);
 }
 
-int run_sdl(Adam *a, Typer *t)
+int run_sdl(Adam *a, Typer *t, JoyScript *js)
 {
     SDL_SetMainReady();
     if (!a->printer.path[0]) snprintf(a->printer.path, sizeof a->printer.path, "adampc_printout.txt");
@@ -78,7 +78,7 @@ int run_sdl(Adam *a, Typer *t)
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
-    SDL_Window *win = SDL_CreateWindow("adamPC - Coleco ADAM", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+    SDL_Window *win = SDL_CreateWindow(a->coleco ? "adamPC - ColecoVision" : "adamPC - Coleco ADAM", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                        VDP_W * 3, VDP_H * 3, SDL_WINDOW_RESIZABLE);
     SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     SDL_RenderSetLogicalSize(ren, VDP_W * 4, VDP_H * 3);   /* ~4:3 pixel aspect */
@@ -174,6 +174,15 @@ int run_sdl(Adam *a, Typer *t)
         }
 
         typer_step(a, t);
+        if (js) joy_script_step(a, js, (int)a->frames);
+        if (a->prof.enabled && a->frames % 30 == 0 && a->prof.intervals) {
+            /* profile in the title bar: running totals */
+            char title[160];
+            snprintf(title, sizeof title, "adamPC - busy avg %.0f%% max %.0f%%, overruns %llu, VRAM hard %llu risky %llu, sprite lines lost %llu",
+                     a->prof.busy_sum / (double)a->prof.intervals, a->prof.busy_max, (unsigned long long)a->prof.overruns,
+                     (unsigned long long)a->prof.t_hard, (unsigned long long)a->prof.t_risky, (unsigned long long)a->prof.t_5s_lines);
+            SDL_SetWindowTitle(win, title);
+        }
         adam_run_frame(a);
 
         if (turbo && ddp_motor_on(&a->ddp)) {

@@ -10,11 +10,14 @@
 #include "ddp.h"
 #include "wd2793.h"
 #include "printer.h"
+#include "ay8910.h"
+#include "vdpprof.h"
 
 #define Z80_HZ        3579545.0
 #define PS_PER_Z80    279365ull        /* 1e12 / 3579545, rounded */
 #define PS_PER_E      1000000ull       /* 6801 E clock = 1 MHz */
 #define AUDIO_RATE    44100
+#define CART_MAX      (1024 * 1024)   /* MegaCart: up to 64 banks of 16K */
 
 /* keyboard matrix: 13 columns (P3 bits 0-7, P4 bits 0-4) x 8 rows (P1) */
 #define KBD_KEYS      (13 * 8)
@@ -46,7 +49,19 @@ struct Adam {
     uint8_t wp[0x8000];           /* SmartWriter ROMs, lower 32K */
     int wp_size;
     uint8_t eos[0x4000];
-    uint8_t cart[0x8000]; int has_cart;
+    uint8_t *cart; int has_cart;  /* cartridge ROM, cart_banks x 16K */
+    int cart_banks;               /* more than 2 = MegaCart */
+    uint8_t cart_bank;            /* MegaCart: bank at 0xC000-0xFFFF (last bank fixed at 0x8000) */
+
+    /* ColecoVision mode (--coleco): no ADAM, 1K of RAM mirrored at 0x6000-0x7FFF */
+    int coleco;
+    uint8_t cv_ram[1024];
+    /* Super Game Module: AY-3-8910 at ports 0x50/0x51/0x52; on a ColecoVision also
+     * 24K of RAM at 0x2000-0x7FFF (port 0x53 bit 0) and 8K over the BIOS (port 0x7F bit 1 = 0) */
+    int sgm;
+    AY8910 ay;
+    uint8_t sgm_53, sgm_7f;
+    uint8_t sgm_ram[0x8000];
     uint8_t xrom[0x8000]; int has_xrom;
 
     uint8_t memmap;               /* port 0x7F */
@@ -79,19 +94,25 @@ struct Adam {
 
     int trace_z80;
     int trace_eos;                /* log calls into the EOS jump table (FC30-FD5F) */
+    int trace_ay;                 /* log AY-3-8910 register writes */
     int watch;                    /* RAM address whose writes are logged (-1 = off) */
 
     /* audio: PSG output rendered in step with the writes */
     int16_t audio[2048];
     int audio_n;
     uint64_t frame_start_ps;
+    int16_t ay_audio[2048];
+
+    VdpProf prof;                 /* --prof */
+    int vdp_kind;                 /* VDP port access made by the current instruction (-1 none) */
 };
 
+/* 1 = all ROMs, -1 = only OS-7 (enough for --coleco), 0 = no OS-7 */
 int  adam_load_roms(Adam *a, const char *romdir);
 void adam_init(Adam *a);
-void adam_power_on(Adam *a);              /* power on / computer reset */
+void adam_power_on(Adam *a);              /* power on / computer reset (ColecoVision mode: console power on) */
 void adam_game_reset(Adam *a);             /* cartridge reset: OS-7 + cartridge */
-int  adam_load_cart(Adam *a, const char *path);
+int  adam_load_cart(Adam *a, const char *path);   /* > 32K = MegaCart */
 void adam_attach_disk_drive(Adam *a, int unit);   /* before adam_power_on */
 int  adam_insert_disk(Adam *a, int unit, const char *path);
 int  adam_set_fdc_rom(Adam *a, int unit, const char *path);   /* after adam_load_roms */

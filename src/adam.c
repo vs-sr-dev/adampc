@@ -26,7 +26,11 @@ int adam_load_roms(Adam *a, const char *dir)
     snprintf(sub, sizeof sub, "%s/adam", dir);
     memset(a->wp, 0xFF, sizeof a->wp);
     memset(a->eos, 0xFF, sizeof a->eos);
-    ok &= load_file(sub, "os7.u2", a->os7, sizeof a->os7, NULL);
+    /* OS-7 is the ColecoVision BIOS, same 8K */
+    if (!load_file(sub, "os7.u2", a->os7, sizeof a->os7, NULL)) {
+        fprintf(stderr, "adam: missing %s/os7.u2\n", sub);
+        return 0;
+    }
     ok &= load_file(sub, "alf @1 rev 57 e3d5.u8", a->wp, 0x2000, NULL);
     ok &= load_file(sub, "alf @2 rev 57 ae6a.u20", a->wp + 0x2000, 0x2000, NULL);
     ok &= load_file(sub, "alf @3 rev 57 8534.u21", a->wp + 0x4000, 0x2000, NULL);
@@ -42,8 +46,8 @@ int adam_load_roms(Adam *a, const char *dir)
     snprintf(sub, sizeof sub, "%s/adam_fdc", dir);
     ok &= load_file(sub, "adam disk u10 ad 31 rev a 09-27-84.u10", a->fdc_rom[0], sizeof a->fdc_rom[0], NULL);
     memcpy(a->fdc_rom[1], a->fdc_rom[0], sizeof a->fdc_rom[1]);
-    if (!ok) fprintf(stderr, "adam: missing ROM files under %s\n", dir);
-    return ok;
+    if (!ok && !a->coleco) fprintf(stderr, "adam: missing ROM files under %s\n", dir);
+    return ok ? 1 : -1;
 }
 
 /* ------------------------------------------------------------- Z80 bus */
@@ -59,9 +63,42 @@ int adam_set_xram(Adam *a, int kbytes)
     a->xram_banks = banks; a->has_xram = 1; a->xbank = 0;
     return 1;
 }
+/* cartridge port 0x8000-0xFFFF. MegaCart (more than 32K): the last 16K bank is fixed at
+ * 0x8000, 0xC000-0xFFFF shows the selected bank, and reading 0xFFC0+N selects bank N
+ * (the read itself returns the byte of the current bank) */
+static uint8_t cart_read(Adam *a, uint16_t addr)
+{
+    if (!a->has_cart) return 0xFF;
+    if (a->cart_banks <= 2) return a->cart[addr - 0x8000];
+    if (addr < 0xC000) return a->cart[(size_t)(a->cart_banks - 1) * 0x4000 + (addr - 0x8000)];
+    uint8_t v = a->cart[(size_t)a->cart_bank * 0x4000 + (addr - 0xC000)];
+    if (addr >= 0xFFC0) a->cart_bank = (uint8_t)((addr & 0x3F) % a->cart_banks);
+    return v;
+}
+
+/* ColecoVision memory map (+ Super Game Module) */
+static uint8_t cv_read(Adam *a, uint16_t addr)
+{
+    if (addr < 0x2000) return (a->sgm && !(a->sgm_7f & 2)) ? a->sgm_ram[addr] : a->os7[addr];
+    if (addr < 0x8000) {
+        if (a->sgm && (a->sgm_53 & 1)) return a->sgm_ram[addr];
+        return addr >= 0x6000 ? a->cv_ram[addr & 0x3FF] : 0xFF;
+    }
+    return cart_read(a, addr);
+}
+static void cv_write(Adam *a, uint16_t addr, uint8_t v)
+{
+    if (addr < 0x2000) { if (a->sgm && !(a->sgm_7f & 2)) a->sgm_ram[addr] = v; return; }
+    if (addr < 0x8000) {
+        if (a->sgm && (a->sgm_53 & 1)) a->sgm_ram[addr] = v;
+        else if (addr >= 0x6000) a->cv_ram[addr & 0x3FF] = v;
+    }
+}
+
 static uint8_t z_read(void *ctx, uint16_t addr)
 {
     Adam *a = ctx;
+    if (a->coleco) return cv_read(a, addr);
     if (addr < 0x8000) {
         switch (a->memmap & 3) {
         case 0:
@@ -78,16 +115,25 @@ static uint8_t z_read(void *ctx, uint16_t addr)
     case 0: return a->ram[addr];
     case 1: return a->has_xrom ? a->xrom[addr - 0x8000] : 0xFF;
     case 2: return a->has_xram ? XRAM(a)[addr] : 0xFF;
-    default: return a->has_cart ? a->cart[addr - 0x8000] : 0xFF;
+    default: return cart_read(a, addr);
     }
 }
 
 static void z_write(void *ctx, uint16_t addr, uint8_t v)
 {
     Adam *a = ctx;
+    /* idle detection: only a write that changes memory is work (a wait loop that calls a
+     * function pushes the same return address again and again); 0xFFC0+ is never RAM on a
+     * cartridge and reading it would switch MegaCart banks */
+    if (a->prof.enabled) {
+        int cart_up = a->coleco || ((a->memmap >> 2) & 3) == 3;
+        if (addr >= 0xFFC0 && cart_up) { }
+        else if (z_read(a, addr) != v) vdpprof_write(&a->prof);
+    }
     if (a->watch == addr)
         fprintf(stderr, "[watch %10.4f s] Z80 %04X writes %02X (was %02X)\n",
                 (double)a->z80_ps / 1e12, a->z80.pc.w, v, a->ram[addr]);
+    if (a->coleco) { cv_write(a, addr, v); return; }
     if (addr < 0x8000) {
         switch (a->memmap & 3) {
         case 1: a->ram[addr] = v; break;
@@ -131,15 +177,31 @@ static void audio_sync(Adam *a)
     uint64_t dt = a->z80_ps > a->frame_start_ps ? a->z80_ps - a->frame_start_ps : 0;
     int target = (int)(dt * AUDIO_RATE / 1000000000000ull);
     if (target > (int)(sizeof a->audio / sizeof a->audio[0])) target = (int)(sizeof a->audio / sizeof a->audio[0]);
-    if (target > a->audio_n) { sn76489_render(&a->psg, a->audio + a->audio_n, target - a->audio_n); a->audio_n = target; }
+    if (target <= a->audio_n) return;
+    int n = target - a->audio_n;
+    sn76489_render(&a->psg, a->audio + a->audio_n, n);
+    if (a->sgm) {
+        ay8910_render(&a->ay, a->ay_audio, n);
+        for (int i = 0; i < n; i++) {
+            int v = a->audio[a->audio_n + i] + a->ay_audio[i];
+            a->audio[a->audio_n + i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+        }
+    }
+    a->audio_n = target;
 }
 
 static uint8_t z_in(void *ctx, uint16_t port)
 {
     Adam *a = ctx;
     uint8_t p = (uint8_t)port;
-    if (p >= 0xA0 && p <= 0xBF) return tms9918_read(&a->vdp, p & 1);
+    if (p >= 0xA0 && p <= 0xBF) {
+        uint8_t r = tms9918_read(&a->vdp, p & 1);
+        /* a status read that takes a set frame flag away from the NMI handler is told apart */
+        if (a->prof.enabled) a->vdp_kind = !(p & 1) ? VP_DATA_R : (r & 0x80) ? VP_STATUS_F : VP_STATUS_R;
+        return r;
+    }
     if (p >= 0xE0) return read_controller(a, (p >> 1) & 1);
+    if (p == 0x52 && a->sgm) return ay8910_read(&a->ay);
     return 0xFF;
 }
 
@@ -147,6 +209,29 @@ static void z_out(void *ctx, uint16_t port, uint8_t v)
 {
     Adam *a = ctx;
     uint8_t p = (uint8_t)port;
+    if (a->prof.enabled) vdpprof_write(&a->prof);
+    if (p >= 0xA0 && p <= 0xBF) {
+        if (a->prof.enabled)
+            a->vdp_kind = !(p & 1) ? VP_DATA_W : !a->vdp.latch_full ? VP_CTRL_1ST
+                        : (v & 0x80) ? VP_REG_W : (v & 0x40) ? VP_SETUP_W : VP_SETUP_R;
+        tms9918_write(&a->vdp, p & 1, v);
+        return;
+    }
+    if (a->sgm && p == 0x50) { ay8910_address(&a->ay, v); return; }
+    if (a->sgm && p == 0x51) {
+        if (a->trace_ay) fprintf(stderr, "[ay frame %llu] R%d = %02X  PC=%04X\n", (unsigned long long)a->frames, a->ay.addr, v, a->z80.pc.w);
+        audio_sync(a); ay8910_write(&a->ay, v);
+        return;
+    }
+    if (a->coleco) {
+        /* ColecoVision: nothing decodes 0x00-0x7F except an attached SGM */
+        if (a->sgm && p == 0x53) a->sgm_53 = v;
+        else if (a->sgm && p == 0x7F) a->sgm_7f = v;
+        else if (p >= 0x80 && p <= 0x9F) a->ctrl_mode = 1;
+        else if (p >= 0xC0 && p <= 0xDF) a->ctrl_mode = 0;
+        else if (p >= 0xE0) { audio_sync(a); sn76489_write(&a->psg, v); }
+        return;
+    }
     if (p >= 0x20 && p <= 0x3F) {
         uint8_t old = a->port3f;
         a->port3f = v;
@@ -157,8 +242,6 @@ static void z_out(void *ctx, uint16_t port, uint8_t v)
         a->memmap = v & 0x0F;
     } else if (p >= 0x80 && p <= 0x9F) {
         a->ctrl_mode = 1;
-    } else if (p >= 0xA0 && p <= 0xBF) {
-        tms9918_write(&a->vdp, p & 1, v);
     } else if (p >= 0xC0 && p <= 0xDF) {
         a->ctrl_mode = 0;
     } else if (p >= 0xE0) {
@@ -397,11 +480,31 @@ void adam_init(Adam *a)
     a->prn.cpu.port_in = prn_port_in; a->prn.cpu.port_out = prn_port_out;
     adam_attach_disk_drive(a, 0);      /* the usual ADAM has disk drive 1 */
     sn76489_init(&a->psg, Z80_HZ, 44100);
+    ay8910_init(&a->ay, Z80_HZ / 2, AUDIO_RATE);      /* SGM: AY clocked at 1.789772 MHz */
+    a->vdp_kind = -1;
     a->keypad[0] = a->keypad[1] = -1;
+}
+
+static void cart_power_on(Adam *a)
+{
+    /* MegaCart at power on: the last bank in both windows */
+    a->cart_bank = (uint8_t)(a->cart_banks ? a->cart_banks - 1 : 0);
+    a->sgm_53 = 0; a->sgm_7f = 0x0F;
+    ay8910_reset(&a->ay);
 }
 
 void adam_power_on(Adam *a)
 {
+    cart_power_on(a);
+    if (a->coleco) {
+        memset(a->cv_ram, 0, sizeof a->cv_ram);
+        memset(a->sgm_ram, 0, sizeof a->sgm_ram);
+        a->ctrl_mode = 0;
+        z80_reset(&a->z80);
+        tms9918_reset(&a->vdp);
+        a->z80_ps = a->now_ps = 0;
+        return;
+    }
     memset(a->ram, 0, sizeof a->ram);
     a->memmap = 0; a->port3f = 0; a->ctrl_mode = 0;
     z80_reset(&a->z80);
@@ -422,9 +525,11 @@ void adam_power_on(Adam *a)
 void adam_game_reset(Adam *a)
 {
     /* CVRST: Z80, MIOC (map = OS-7 + cartridge) and the master 6801 */
+    cart_power_on(a);
     a->memmap = 0x0F; a->port3f = 0;
     z80_reset(&a->z80);
     tms9918_reset(&a->vdp);
+    if (a->coleco) return;
     uint64_t cyc = a->master.cpu.cycles;
     m6801_reset(&a->master.cpu);
     a->master.cpu.cycles = cyc;
@@ -435,10 +540,16 @@ int adam_load_cart(Adam *a, const char *path)
 {
     FILE *f = fopen(path, "rb");
     if (!f) return 0;
-    memset(a->cart, 0xFF, sizeof a->cart);
-    size_t n = fread(a->cart, 1, sizeof a->cart, f);
+    if (!a->cart) a->cart = malloc(CART_MAX);
+    if (!a->cart) { fclose(f); return 0; }
+    memset(a->cart, 0xFF, CART_MAX);
+    size_t n = fread(a->cart, 1, CART_MAX, f);
     fclose(f);
     a->has_cart = n > 0;
+    /* whole 16K banks; a MegaCart image is a power of two of them */
+    a->cart_banks = (int)((n + 0x3FFF) / 0x4000);
+    if (a->cart_banks < 2) a->cart_banks = 2;
+    if (a->cart_banks > 2) fprintf(stderr, "cartridge: MegaCart, %d banks of 16K\n", a->cart_banks);
     return a->has_cart;
 }
 
@@ -569,9 +680,31 @@ static void run_until(Adam *a, uint64_t end_ps)
                 fprintf(stderr, "Z80 %04X AF=%04X BC=%04X DE=%04X HL=%04X SP=%04X\n",
                         a->z80.pc.w, a->z80.af.w, a->z80.bc.w, a->z80.de.w, a->z80.hl.w, a->z80.sp.w);
             }
+            if (a->prof.enabled) {
+                uint16_t pc0 = a->z80.pc.w;
+                int nmi = a->z80.nmi_pending;
+                int bank0 = (a->cart_banks > 2 && pc0 >= 0xC000 && (a->coleco || ((a->memmap >> 2) & 3) == 3))
+                            ? a->cart_bank : -1;
+                a->vdp_kind = -1;
+                int c = z80_step(&a->z80);
+                vdpprof_pc(&a->prof, pc0, bank0, c);
+                if (nmi) vdpprof_nmi(&a->prof, &a->vdp, pc0, a->z80.sp.w, a->z80_ps);
+                else {
+                    if (a->vdp_kind >= 0) {
+                        /* the I/O cycle is the last machine cycle, before the 5-cycle repeat of OTIR/INIR */
+                        int at = c - (a->z80.pc.w == pc0 ? 5 : 0) - 1;
+                        vdpprof_access(&a->prof, &a->vdp, a->vdp_kind, a->z80_ps + (uint64_t)at * PS_PER_Z80,
+                                       a->frame_start_ps, pc0, bank0);
+                    }
+                    vdpprof_step(&a->prof, pc0, a->z80.pc.w, a->z80.sp.w, a->z80.halted, a->z80_ps);
+                }
+                a->z80_ps += (uint64_t)c * PS_PER_Z80;
+                continue;
+            }
             int c = z80_step(&a->z80);
             a->z80_ps += (uint64_t)c * PS_PER_Z80;
         }
+        if (a->coleco) { a->now_ps = slice; continue; }
         run_dev(&a->master, slice);
         run_dev(&a->kbd, slice);
         run_dev(&a->tape, slice);
@@ -589,7 +722,9 @@ void adam_run_frame(Adam *a)
     for (;;) {
         uint64_t line_end = a->now_ps + VDP_CPU_PER_LINE * PS_PER_Z80;
         run_until(a, line_end);
+        int line = a->vdp.line;
         int done = tms9918_run_line(&a->vdp);
+        if (line == 191 && a->prof.enabled) vdpprof_frame_flag(&a->prof, &a->vdp, a->now_ps, a->frames);
         if (a->vdp.int_out && !a->last_vdp_int) z80_nmi(&a->z80);
         a->last_vdp_int = a->vdp.int_out;
         if (done) break;
