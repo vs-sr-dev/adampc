@@ -8,7 +8,8 @@
  *   Alt+T tape turbo on/off (runs ahead while a tape motor turns; on by default),
  *   drop a .ddp on the window to load it in tape drive 1, anything else as a cartridge,
  *   Alt+1..0 / Alt+- / Alt+= controller-1 keypad 1..0 * #.
- * Controller 1: gamepad, or numpad 8/4/6/2 + numpad 0 (left fire) + numpad Enter (right fire).
+ * Controller 1: gamepad, or numpad 8/4/6/2 + numpad 0 (left fire) + numpad Enter (right fire);
+ *   with --coleco (no ADAM keyboard) also the arrow keys + Z (left fire) / X (right fire).
  */
 #ifdef ADAM_SDL
 #define SDL_MAIN_HANDLED
@@ -92,6 +93,7 @@ int run_sdl(Adam *a, Typer *t, JoyScript *js)
     SDL_GameController *pad = NULL;
     static uint32_t pix[VDP_W * VDP_H];
     int running = 1, turbo = 1;
+    uint8_t kjoy = 0;          /* controller 1 bits held on the host keyboard */
     uint64_t perf = SDL_GetPerformanceFrequency(), next = SDL_GetPerformanceCounter();
     const double frame_s = 262.0 * 228.0 / Z80_HZ;
 
@@ -128,14 +130,24 @@ int run_sdl(Adam *a, Typer *t, JoyScript *js)
                     else if (k == SDLK_t) { turbo = !turbo; fprintf(stderr, "tape turbo %s\n", turbo ? "on" : "off"); }
                     break;
                 }
-                switch (k) {   /* controller 1 on the numpad */
-                case SDLK_KP_8: a->joy[0] = (uint8_t)(down ? a->joy[0] | 1 : a->joy[0] & ~1); continue;
-                case SDLK_KP_6: a->joy[0] = (uint8_t)(down ? a->joy[0] | 2 : a->joy[0] & ~2); continue;
-                case SDLK_KP_2: a->joy[0] = (uint8_t)(down ? a->joy[0] | 4 : a->joy[0] & ~4); continue;
-                case SDLK_KP_4: a->joy[0] = (uint8_t)(down ? a->joy[0] | 8 : a->joy[0] & ~8); continue;
-                case SDLK_KP_0: a->joy[0] = (uint8_t)(down ? a->joy[0] | 0x10 : a->joy[0] & ~0x10); continue;
-                case SDLK_KP_ENTER: a->joy[0] = (uint8_t)(down ? a->joy[0] | 0x20 : a->joy[0] & ~0x20); continue;
-                default: break;
+                {   /* controller 1 on the numpad (and arrows/Z/X on a ColecoVision) */
+                    uint8_t bit = 0;
+                    switch (k) {
+                    case SDLK_KP_8: bit = 1; break;
+                    case SDLK_KP_6: bit = 2; break;
+                    case SDLK_KP_2: bit = 4; break;
+                    case SDLK_KP_4: bit = 8; break;
+                    case SDLK_KP_0: bit = 0x10; break;
+                    case SDLK_KP_ENTER: bit = 0x20; break;
+                    case SDLK_UP: if (a->coleco) bit = 1; break;
+                    case SDLK_RIGHT: if (a->coleco) bit = 2; break;
+                    case SDLK_DOWN: if (a->coleco) bit = 4; break;
+                    case SDLK_LEFT: if (a->coleco) bit = 8; break;
+                    case SDLK_z: if (a->coleco) bit = 0x10; break;
+                    case SDLK_x: if (a->coleco) bit = 0x20; break;
+                    default: break;
+                    }
+                    if (bit) { kjoy = (uint8_t)(down ? kjoy | bit : kjoy & ~bit); continue; }
                 }
                 if (e.key.repeat) break;
                 int idx = host_key_index(a, k);
@@ -156,21 +168,22 @@ int run_sdl(Adam *a, Typer *t, JoyScript *js)
                 if (ks[SDL_SCANCODE_MINUS]) kp = 10;
                 if (ks[SDL_SCANCODE_EQUALS]) kp = 11;
             }
+            /* the state is rebuilt every frame from what is held now: releasing a key or a
+             * pad button releases the controller line */
+            uint8_t j = kjoy;
             if (pad) {
-                uint8_t j = a->joy[0] & 0xC0;
                 if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_UP) || SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY) < -16000) j |= 1;
                 if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX) > 16000) j |= 2;
                 if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY) > 16000) j |= 4;
                 if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX) < -16000) j |= 8;
                 if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A)) j |= 0x10;
                 if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_B)) j |= 0x20;
-                if (j & 0x3F) a->joy[0] = j;
                 if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_X)) kp = 1;
                 if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_Y)) kp = 2;
                 if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_BACK)) kp = 10;
                 if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_START)) kp = 11;
             }
-            a->keypad[0] = kp;
+            if (!js || js->next >= js->n) { a->joy[0] = j; a->keypad[0] = kp; }   /* a --joy script has the controller until it ends */
         }
 
         typer_step(a, t);

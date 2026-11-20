@@ -109,8 +109,8 @@ numpad Enter for the two buttons.
     build/adampc --sgm --cart game.rom                 # the same cartridge on an ADAM (+ the SGM's AY)
 
 Only `roms/adam/os7.u2` is needed for `--coleco` (OS-7 is the ColecoVision BIOS, the same
-8K). Controller 1: gamepad, or numpad 8/4/6/2 + numpad 0 / Enter for the two buttons, Alt+digit
-for the keypad. `--joy FILE` plays a joystick script ("FRAME tokens" per line: up down left
+8K). Controller 1: gamepad, arrow keys + Z / X (with `--coleco`), or numpad 8/4/6/2 + numpad 0 /
+Enter for the two buttons; Alt+digit for the keypad. `--joy FILE` plays a joystick script ("FRAME tokens" per line: up down left
 right fire1 fire2 k0-k9 k* k#, `-` = nothing, `p2` = controller 2; the state holds until the
 next line), so a game can be driven headless to the scene you want to look at.
 
