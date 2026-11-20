@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """Copy a host file into an EOS volume (ADAM disk .dsk 160K, or data pack .ddp/.img).
 
-usage: eosput.py IMAGE HOSTFILE NAME [--type A] [--attr 10]
+usage: eosput.py IMAGE HOSTFILE NAME [--type A] [--attr 10] [--basic]
+
+--basic: HOSTFILE is a SmartBASIC listing in plain text. SmartBASIC 1.2 keeps its programs as
+text: a file saved with SAVE is the program's lines exactly as typed (line number, text, CR),
+no tokens. So a listing only needs CR line ends (CR LF or LF are converted), no blank lines and
+no trailing ^Z; the lines are checked for a leading line number. LOAD NAME then reads it.
 
 The file goes at the start of the free area (the BLOCKS LEFT entry), which shrinks; the
 new directory entry takes the BLOCKS LEFT slot and BLOCKS LEFT moves down one entry.
@@ -39,8 +44,25 @@ def put_block(img, b, data, disk):
         pos += n
 
 
+def basic_text(data, host):
+    """A plain-text listing -> SmartBASIC's program file: lines ending in CR."""
+    text = data.split(b'\x1a')[0].replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+    lines = text.split(b'\n')          # trailing spaces stay: they can be inside a string
+    lines = [ln for ln in lines if ln.strip()]
+    for n, ln in enumerate(lines, 1):
+        digits = ln[:len(ln) - len(ln.lstrip(b'0123456789'))]
+        if not digits:
+            sys.exit(f'{host}: line {n} has no line number: {ln[:40]!r}')
+        if any(c > 127 for c in ln):
+            sys.exit(f'{host}: line {n} has non-ASCII characters')
+    return b''.join(ln + b'\r' for ln in lines)
+
+
 def main():
     args = [a for a in sys.argv[1:]]
+    basic = '--basic' in args
+    if basic:
+        args.remove('--basic')
     opts = {'--type': 'A', '--attr': '10'}
     for k in list(opts):
         if k in args:
@@ -53,6 +75,8 @@ def main():
     img = bytearray(open(path, 'rb').read())
     disk = is_disk(path, img)
     data = open(host, 'rb').read()
+    if basic:
+        data = basic_text(data, host)
     nblk = max(1, (len(data) + 1023) // 1024)
     last = len(data) - (nblk - 1) * 1024
 

@@ -305,6 +305,15 @@ Maker e di `CRLZH20.LBR` (compressi dall'autore). Non esercitata: la ricostruzio
   0x5E00) ha HOME, VTAB, HTAB, INVERSE, FLASH, SPEED, ONERR/RESUME, GR/HGR/HGR2, HPLOT, DRAW,
   XDRAW, SHLOAD, ROT, SCALE, più CLRERR, BLOAD/BRUN, INIT. Anche l'idioma DOS 3.3
   `PRINT CHR$(4);"comando"` funziona. Gli operatori vanno scritti attaccati: `> =` non vale `>=`.
+- **I programmi sono testo**: un file di tipo A salvato con `SAVE` è il programma riga per riga,
+  numero in testa e CR in fondo, senza token. `LOAD` legge le righe come se fossero digitate: le
+  normalizza (toglie lo spazio dopo il numero e attorno alle parole chiave, `LOMEM : 32256: REM`
+  diventa `LOMEM :32256:REM`) e `SAVE` riscrive la forma normalizzata. Verificato: Oregon Trail
+  caricato come testo grezzo e risalvato è identico, riga per riga, alla versione digitata.
+  Stranezza: una riga `7 REM` vuota viene memorizzata con il testo della riga precedente (succede
+  uguale digitando). Quindi niente tokenizzatore: `tools/eosput.py --basic` basta.
+- **GAME** (domanda aperta della sessione 1): è un programma di 10 righe seguito da residui di
+  directory compresi nella lunghezza del file; `LOAD` li legge come righe, da qui l'errore.
 - **Memoria**: l'interprete occupa RAM fino a 0x7B6B; **0x7C00-0x7FFF è libera** (posto sicuro per
   codice Z80 chiamato con CALL, alzando LOMEM). Il programma sta **in alto** (sotto ~D17F) e cresce
   verso il basso; con un programma da 15K il LOAD dura ~48 s perché ogni riga inserita sposta le

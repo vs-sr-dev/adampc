@@ -189,10 +189,22 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
 - Insidie: `DIR` di CP/M si interrompe a un tasto premuto; un tasto battuto mentre un `.COM` grande
   si carica va perso (tempi del typer, non dell'emulatore).
 
+## Sessione del 2026-11-20 (seguito): listati SmartBASIC
+
+- Scoperta: SmartBASIC 1.2 salva i programmi come **testo** (riga = numero + testo + CR, nessun
+  token). Il file di HANOI salvato dopo la digitazione è identico byte per byte al listato.
+  `LOAD` legge le righe come se fossero digitate e le normalizza; `SAVE` scrive la forma normalizzata.
+- `tools/eosput.py --basic` (fine riga CR, controllo dei numeri di riga), `tools/eosdir.py --get`.
+  Oregon Trail (19,5K di testo grezzo) messo sul disco così, `LOAD` + `SAVE` = identico alla
+  versione digitata nella sessione 2 (che aveva richiesto 330000 frame di digitazione).
+- Prova `sb_basic` in `tests/regress.sh`: LOAD del file messo da `--basic`, SAVE con altro nome,
+  i due file coincidono.
+- Risolta anche la domanda su GAME: residui di directory nel file.
+
 ## Domande aperte
 
-- **GAME sul disco SmartBASIC**: "?NEXT without FOR in 100"; il blocco 42 contiene un altro
-  programma più residui di directory: probabilmente dati vecchi nell'immagine originale.
+- ~~GAME sul disco SmartBASIC~~: risolta, il file comprende residui di directory dopo
+  `100END` (vedi RECON, SmartBASIC).
 - **Passo dei blocchi sul nastro**: il firmware conta 17,92" per blocco nel salto veloce, ma
   300 piedi / 128 blocchi darebbero ~27"; con 27" la lettura sequenziale non riposizionerebbe.
   Servono misure o testimonianze sui tempi reali di caricamento (es. SmartLOGO, SmartBASIC).
@@ -235,8 +247,8 @@ Poi le rifiniture, nessuna bloccante:
    stallo DMA applicato in tempo reale invece che a posteriori.
 4. Spinner (INT dello Z80), secondo controller, mappatura tasti configurabile.
 5. Software su nastro (giochi) e software che usi l'espansione di memoria, se se ne trovano.
-6. Tokenizzatore SmartBASIC: listato di testo -> file di tipo A dentro un .dsk/.ddp, così i
-   listati (Apple o ADAM) si caricano senza digitarli (formato della riga visto a D16C: da studiare).
+6. ~~Tokenizzatore SmartBASIC~~: non serve, i programmi SmartBASIC sono testo
+   (`tools/eosput.py --basic`, prova `sb_basic`).
 7. Strumenti: `eosdir.py`/`eosput.py` conoscono solo la mappa standard da 160K; aggiungere le
    mappe delle altre ROM (le formule stanno in `tests/tools/expect_map.py`).
 

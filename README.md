@@ -89,7 +89,10 @@ the AdamNet master), `--dump-ram FILE`.
 
 Disk images are written back when changed. Drop a `.dsk` on the window to put it in drive 1.
 `tools/eosdir.py IMAGE` lists the EOS directory of a disk or tape image (standard 160K layout),
-`tools/eosput.py IMAGE HOSTFILE NAME` copies a file into one.
+`tools/eosput.py IMAGE HOSTFILE NAME` copies a file into one, `tools/eosdir.py IMAGE --get NAME
+HOSTFILE` copies one out. SmartBASIC 1.2 keeps programs as plain text (a saved program is its
+lines, number first, ending in CR; `LOAD` reads them as if typed), so a BASIC listing goes on a
+disk or data pack directly: `tools/eosput.py IMAGE listing.bas NAME --basic`, then `LOAD NAME`.
 
 CP/M disks: `tools/cpmdisk.py dir|get|put|era|new IMAGE ...` reads and writes files on an ADAM
 CP/M 2.2 disk (160K; the disk parameter block of the ADAM BIOS). `tools/lbr.py list|x LIB.LBR`
@@ -170,7 +173,7 @@ Z80 routine, its tables fit SmartBASIC's 31 columns. With your copy of the disk:
     python tools/a2dos.py OREGON1975APPLE.DSK OREGON1975 oregon_apple.bas
     python tools/oregon2adam.py oregon_apple.bas oregon_adam.bas
     cp smartbasic.dsk oregon.dsk      # a copy of your SmartBASIC 1.2 disk
-    build/adampc --headless --disk oregon.dsk --frames 330000 --type-at 3400                  --type "~03|NEW~0D||" --type-file oregon_adam.bas --type-after "||SAVE OREGON~0D"
+    python tools/eosput.py oregon.dsk oregon_adam.bas OREGON --basic
     build/adampc --disk oregon.dsk    # Ctrl+C to leave the menu, RUN OREGON (~50 s to load), Caps Lock
 
 ## Tests

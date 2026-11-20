@@ -56,6 +56,17 @@ t_sb_typein() {
     $PY tools/eosdir.py $o/sb.dsk | grep -q "^HANOI .*type A" && pass sb_typein || fail sb_typein "HANOI not saved"
 }
 
+# a listing put on the disk as text (eosput --basic): SmartBASIC LOADs it and SAVEs it back
+# under another name byte for byte (SmartBASIC keeps programs as text, no tokens)
+t_sb_basic() {
+    local o=$OUT/sb_basic; mkdir -p $o; cp "$SB" $o/sb.dsk
+    $PY tools/eosput.py $o/sb.dsk "media/Towers of Hanoi (198x)(Matz, Phil)/Towers of Hanoi (198x)(Matz, Phil).bas" HANOI --basic >/dev/null
+    $EMU --headless --disk $o/sb.dsk --frames 8000 --type-at 3400          --type "~03|NEW~0D||LOAD HANOI~0D||||||SAVE HANOI2~0D" >/dev/null 2>&1
+    $PY tools/eosdir.py $o/sb.dsk --get HANOI $o/a.bin >/dev/null
+    $PY tools/eosdir.py $o/sb.dsk --get HANOI2 $o/b.bin >/dev/null 2>&1
+    cmp -s $o/a.bin $o/b.bin && pass sb_basic || fail sb_basic "HANOI2 missing or different"
+}
+
 # CPM-Smartwriter Filter Utility: two disk drives, EOS file in, converted file out
 t_filter() {
     local o=$OUT/filter; mkdir -p $o; cp "$SB" $o/d5.dsk; rm -f $o/d6.dsk
@@ -153,7 +164,7 @@ t_fdc_a720()    { floppy a720    "$R/a720dipi 7607 mmsg =c= 1988.u10"      73728
 t_fdc_1440hd()  { floppy 1440hd  "$R/1440k micro innovations hd-dd.u10"    1474560 1440 FACE 18 1440; }
 t_fdc_1440dd()  { floppy 1440dd  "$R/1440k micro innovations hd-dd.u10"    737280  720  FACF 9  720; }
 
-ALL="sgm_ay vdp_prof ff_sgm logmaker sb_devices sw_print tape_store sb_typein filter fdc_std fdc_320ta fdc_dbl fdc_pmhd fdc_fast fdc_a720 fdc_1440hd fdc_1440dd"
+ALL="sgm_ay vdp_prof ff_sgm logmaker sb_devices sw_print tape_store sb_typein sb_basic filter fdc_std fdc_320ta fdc_dbl fdc_pmhd fdc_fast fdc_a720 fdc_1440hd fdc_1440dd"
 [ $# -gt 0 ] && ALL="$*"
 for t in $ALL; do t_$t > $OUT/$t.result 2>&1 & done
 wait
