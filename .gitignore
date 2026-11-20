@@ -9,3 +9,5 @@
 adampc_printout.txt
 # disassemblies of the 6801 ROMs: generated from your own ROMs by tools/gendis.sh
 /docs/dis/
+# Python bytecode
+__pycache__/
