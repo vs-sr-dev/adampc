@@ -31,8 +31,8 @@ people writing ColecoVision/ADAM software (see "Profiling").
 
 Runs: SmartWriter (typewriter and word processor, printing, STORE/GET on tape), SmartLOGO
 (tape), SmartBASIC 1.2 (disk and tape, SAVE/LOAD, typed-in listings), CP/M 2.2 + WordStar,
-Adam Links Golf, Market Monitor, Log Maker (CP/M); the coleco-ff port of Final Fantasy (SGM + 512K MegaCart) on
-both the ColecoVision and the ADAM.
+Adam Links Golf, Market Monitor, Log Maker (CP/M); the coleco-ff port of Final Fantasy
+(SGM + 512K MegaCart) on both the ColecoVision and the ADAM.
 
 ## Bring your own files
 
@@ -45,6 +45,8 @@ firmware (they would be the firmware itself). You supply them:
 | The ADAM ROM set (MAME layout) | `roms/` (see "Use") | everything |
 | Disk, tape and cartridge images | anywhere, e.g. `media/` | the software you want to run |
 | Firmware listings | `tools/gendis.sh` writes them to `docs/dis/` from your ROMs | following docs/RECON.md |
+| zexdoc / zexall (Frank Cringle's Z80 instruction exercisers, `.com`) | `tests/zex/` | the CPU test |
+| The software the end-to-end tests run (list at the top of `tests/regress.sh`) | `media/` | `tests/regress.sh` |
 
 Media are written back when the emulated machine changes them: work on copies.
 
@@ -67,7 +69,8 @@ SmartWriter `alf` chips, the EOS chip, the master 6801), `roms/adam_kb/keyboard.
 Debugging: `--trace-net` (AdamNet bytes), `--trace-ddp`/`--trace-ddp2` (tape), `--trace-wd`
 (disk controller), `--trace-prn` (printer strikes), `--trace-eos` (calls into the EOS jump
 table), `--trace-z80 FROM TO` (frames), `--watch ADDR` (writes to a RAM byte by the Z80 and
-the AdamNet master), `--dump-ram FILE`.
+the AdamNet master), `--trace-ay` (Super Game Module sound), `--dump-ram FILE`,
+`--dump-vram FILE` (16K of VRAM, then the 8 VDP registers).
 
     build/adampc                      # window
     build/adampc --cart game.col      # ColecoVision cartridge (game reset)
@@ -78,7 +81,8 @@ the AdamNet master), `--dump-ram FILE`.
     build/adampc --headless --disk sb.dsk --type "~03|NEW~0D" --png s --shots 600
                                       # typing: ~XX = ADAM key code in hex, | = 1 s pause;
                                       # --shots N saves s.<frame>.png every N frames
-    build/adampc --headless --disk sb.dsk --type-at 3000 --type "~03|NEW~0D||"                  --type-file prog.bas --type-after "||RUN~0D"
+    build/adampc --headless --disk sb.dsk --type-at 3000 --type "~03|NEW~0D||" \
+                 --type-file prog.bas --type-after "||RUN~0D"
                                       # type a BASIC listing (plain text, CR/LF lines), then more keys
     build/adampc --disk sb.dsk --disk2 big.dsk --fdc-rom2 "roms/adam_fdc/1440k micro innovations hd-dd.u10"
                                       # drive 2 with another controller ROM (image size = geometry:
@@ -104,8 +108,8 @@ checksum verified); `tools/lbr.py unlzh FILE` does a single file. For example, L
     python tools/cpmdisk.py put b.dsk lm/LOGMAKER.COM
     build/adampc --disk cpm_system.dsk --disk2 b.dsk      # A>B:  then  LOGMAKER bbsname number
 
-A `.ddp` image (256 x 1K blocks) is written back when the emulated machine changed it. Tape access runs at the real
-speed of the drive (a block every ~0.9 s, ~20 s to boot from a tape whose block 0 sits mid-tape)
+A `.ddp` image (256 x 1K blocks) is written back when the emulated machine changed it. Tape
+access runs at the real speed of the drive (a block every ~0.9 s, ~20 s to boot from a tape whose block 0 sits mid-tape)
 but the window speeds up while a tape motor turns (Alt+T toggles it). Drop a `.ddp` on the
 window to load it, or a cartridge image. `tools/mktesttape.py` builds test tapes
 (a boot block that prints a message; `--rw` writes and reads back a block through EOS).
@@ -123,9 +127,10 @@ numpad Enter for the two buttons.
 
 Only `roms/adam/os7.u2` is needed for `--coleco` (OS-7 is the ColecoVision BIOS, the same
 8K). Controller 1: gamepad, arrow keys + Z / X (with `--coleco`), or numpad 8/4/6/2 + numpad 0 /
-Enter for the two buttons; Alt+digit for the keypad. `--joy FILE` plays a joystick script ("FRAME tokens" per line: up down left
-right fire1 fire2 k0-k9 k* k#, `-` = nothing, `p2` = controller 2; the state holds until the
-next line), so a game can be driven headless to the scene you want to look at.
+Enter for the two buttons; Alt+digit for the keypad. `--joy FILE` plays a joystick script
+("FRAME tokens" per line: up down left right fire1 fire2 k0-k9 k* k#, `-` = nothing, `p2` =
+controller 2; the state holds until the next line), so a game can be driven headless to the
+scene you want to look at.
 
 ### Profiling
 
@@ -178,18 +183,41 @@ Z80 routine, its tables fit SmartBASIC's 31 columns. With your copy of the disk:
 
 ## Tests
 
-    build/zextest tests/zex/zexall.com
-    tests/regress.sh          # real software end to end (needs the images in media/):
-                              # printing, tape STORE, typed-in BASIC, two-drive file
-                              # conversion, format + block mapping of every disk ROM;
-                              # Log Maker from its .lbr to a script written under CP/M;
-                              # AY frequencies and the profiler on hand-assembled
-                              # cartridges; Final Fantasy (coleco-ff) to the overworld
+    build/zextest tests/zex/zexall.com     # your copy of zexall (or zexdoc)
+    tests/regress.sh                       # 20 end-to-end tests in parallel, about 90 s
+    tests/regress.sh sb_basic logmaker     # only these
+
+`tests/regress.sh` checks things that do not need eyes: the printer's text, EOS and CP/M
+directories, where blocks land on a disk, VRAM contents, measured frequencies. Some tests need
+only the ROMs: boot and block write from test tapes (`tools/mktesttape.py`), SmartWriter
+printing and STORE to a new data pack, and the AY and VDP-profiler checks, which run
+hand-assembled cartridges built by `tests/tools/`. The others run real software you bring in
+`media/` (SmartBASIC, CP/M, Log Maker, the alternative disk ROMs, coleco-ff); without it they
+print SKIP.
+
+## Credits
+
+Written from public documents; the sources are listed in
+[docs/hardware_research.md](docs/hardware_research.md). Among them:
+
+- Coleco, *ADAM Technical Reference Manual* (1984), and the schematics in the ADAM archive.
+- Texas Instruments, *TMS9918A/TMS9928A/TMS9929A Video Display Processors Data Manual* (1982).
+- Wouter Vermaelen, *VDP VRAM timing* (openMSX, 2014), whose TMS9918 diagram is built on TI's
+  1978 "9918 Master Timing" chart from Karl Guttag's archive: the source of the CPU access
+  slots in `src/vdpslots.h`.
+- Thomas Cherryhomes, *All About AdamNet* and *The Big Adam Talk*.
+- Guy Cousineau, *E.O.S. Programming Manual*; Micro Innovations, *ADAM I/O Port Address Map*.
+- General Instrument, AY-3-8910 data sheet; Motorola, MC6801 data sheet.
+- Roger Warren, `LZHREL.DOC` (CrLZH), and Nino Brunori's reconstructed ADAM CP/M 2.2 source,
+  where the disk parameter block comes from.
+
+No other emulator's source code was used.
 
 ## Documentation
 
 - [docs/hardware_research.md](docs/hardware_research.md): hardware reference compiled from
   public documents, with sources.
 - [docs/RECON.md](docs/RECON.md): what the firmware disassembly showed (in Italian).
+- [TODO.md](TODO.md): the development log, session by session, and what is left (in Italian).
 - `docs/dis/`: disassemblies of the 6801 ROMs, generated from your ROMs by `tools/gendis.sh`
   (addresses in RECON refer to them).

@@ -1,10 +1,18 @@
 #!/bin/bash
 # tests/regress.sh - end-to-end regression run of adamPC against real ADAM software.
 #
-# Needs build/adampc, the ROMs in roms/ and the test images in media/ (not in the repository).
+# Needs build/adampc and the ROMs in roms/. Several tests also need software images in media/
+# (not in the repository, bring your own; a test whose files are missing prints SKIP):
+#   media/SmartBasic v1.2 (1983)(Coleco - LMI)/...dsk          SmartBASIC 1.2 disk
+#   media/Towers of Hanoi (198x)(Matz, Phil)/...bas             a SmartBASIC listing
+#   media/CPM-Smartwriter Filter Utility (1985)(Chesware)/...bas
+#   media/CP-M 2.2 & Assembler (1984) (Coleco)/...dsk           CP/M 2.2 system disk
+#   media/Log Maker (19xx)(-)/...lbr                            Log Maker for CP/M
+#   media/ColecoFF slice78/slice78_mc512.rom                    coleco-ff Final Fantasy build
+#   roms/adam_fdc/*.u10                                         the alternative disk ROMs
 # Every test runs headless on copies under build/regress/ and checks something that does not
 # need eyes: printed text, EOS directories, where blocks land on the disk, the device list
-# EOS built. Tests run in parallel; the run prints PASS/FAIL per test and exits 1 on failure.
+# EOS built. Tests run in parallel; the run prints PASS/FAIL/SKIP per test and exits 1 on failure.
 #
 #   tests/regress.sh            all tests
 #   tests/regress.sh NAME...    only these (see the list at the bottom)
@@ -15,13 +23,26 @@ OUT=build/regress
 PY="python -I"
 SB="media/SmartBasic v1.2 (1983)(Coleco - LMI)/SmartBasic v1.2 (1983)(Coleco - LMI).dsk"
 mkdir -p "$OUT"
+[ -x "$EMU" ] || [ -x "$EMU.exe" ] || { echo "build $EMU first (see README)"; exit 1; }
+[ -f roms/adam/os7.u2 ] || { echo "no ADAM ROMs in roms/ (see README, Bring your own files)"; exit 1; }
+
+HANOI="media/Towers of Hanoi (198x)(Matz, Phil)/Towers of Hanoi (198x)(Matz, Phil).bas"
+FILTER="media/CPM-Smartwriter Filter Utility (1985)(Chesware)/CPM-Smartwriter Filter Utility (1985)(Chesware).bas"
+FF="media/ColecoFF slice78/slice78_mc512.rom"
+LM="media/Log Maker (19xx)(-)/Log Maker (19xx)(-).lbr"
+CPM="media/CP-M 2.2 & Assembler (1984) (Coleco)/CP-M 2.2 & Assembler (1984) (Coleco).dsk"
 
 pass() { echo "PASS $1"; }
 fail() { echo "FAIL $1: $2"; }
+need() {   # TEST FILE...: SKIP the test unless every file is there
+    local t=$1; shift
+    for f in "$@"; do [ -f "$f" ] || { echo "SKIP $t: no $f"; return 1; }; done
+}
 
 # SmartBASIC builds its device list at boot and again from the HELLO menu: the keyboard
 # (node 1) must be in it, or no key is ever read (DMA timing matters here, see RECON)
 t_sb_devices() {
+    need sb_devices "$SB" || return
     local o=$OUT/sb_devices; mkdir -p $o; cp "$SB" $o/sb.dsk
     $EMU --headless --disk $o/sb.dsk --frames 3000 --dump-ram $o/ram.bin >/dev/null 2>&1
     local nodes
@@ -39,6 +60,27 @@ t_sw_print() {
     grep -q "The quick brown fox" $o/page.txt 2>/dev/null && [ -s $o/page.png ] && pass sw_print || fail sw_print "printout: $(cat $o/page.txt 2>/dev/null)"
 }
 
+# boot from a data pack, and a block written and read back through EOS: test tapes built by
+# tools/mktesttape.py (own boot code); the message is found in VRAM through the tape's font
+vram_has() {   # VRAMFILE "WANTED" "ALL MESSAGES|..."
+    $PY -c "
+import sys
+msgs = sys.argv[3].split('|'); chars = sorted(set(''.join(msgs)) | {' '})
+sys.exit(0 if bytes(chars.index(c) for c in sys.argv[2]) in open(sys.argv[1], 'rb').read()[:0x4000] else 1)" "$@"
+}
+t_tape_boot() {
+    local o=$OUT/tape_boot; mkdir -p $o
+    $PY tools/mktesttape.py $o/t.ddp
+    $EMU --headless --ddp $o/t.ddp --frames 2400 --dump-vram $o/v.bin >/dev/null 2>&1
+    vram_has $o/v.bin "ADAM TAPE BOOT OK" "ADAM TAPE BOOT OK" && pass tape_boot || fail tape_boot "no boot message"
+}
+t_tape_rw() {
+    local o=$OUT/tape_rw; mkdir -p $o
+    $PY tools/mktesttape.py --rw $o/t.ddp
+    $EMU --headless --ddp $o/t.ddp --frames 2400 --dump-vram $o/v.bin >/dev/null 2>&1
+    vram_has $o/v.bin "TAPE WRITE OK" "TAPE WRITE OK|TAPE WRITE BAD|WRITE ERR|READ ERR" && pass tape_rw || fail tape_rw "no TAPE WRITE OK"
+}
+
 # SmartWriter STORE to a new data pack
 t_tape_store() {
     local o=$OUT/tape_store; mkdir -p $o; rm -f $o/t.ddp
@@ -49,9 +91,10 @@ t_tape_store() {
 
 # a typed-in listing saved by SmartBASIC
 t_sb_typein() {
+    need sb_typein "$SB" "$HANOI" || return
     local o=$OUT/sb_typein; mkdir -p $o; cp "$SB" $o/sb.dsk
     $EMU --headless --disk $o/sb.dsk --frames 45000 --type-at 3400 --type "~03|NEW~0D||" \
-         --type-file "media/Towers of Hanoi (198x)(Matz, Phil)/Towers of Hanoi (198x)(Matz, Phil).bas" \
+         --type-file "$HANOI" \
          --type-after "||SAVE HANOI~0D" >/dev/null 2>&1
     $PY tools/eosdir.py $o/sb.dsk | grep -q "^HANOI .*type A" && pass sb_typein || fail sb_typein "HANOI not saved"
 }
@@ -59,9 +102,11 @@ t_sb_typein() {
 # a listing put on the disk as text (eosput --basic): SmartBASIC LOADs it and SAVEs it back
 # under another name byte for byte (SmartBASIC keeps programs as text, no tokens)
 t_sb_basic() {
+    need sb_basic "$SB" "$HANOI" || return
     local o=$OUT/sb_basic; mkdir -p $o; cp "$SB" $o/sb.dsk
-    $PY tools/eosput.py $o/sb.dsk "media/Towers of Hanoi (198x)(Matz, Phil)/Towers of Hanoi (198x)(Matz, Phil).bas" HANOI --basic >/dev/null
-    $EMU --headless --disk $o/sb.dsk --frames 8000 --type-at 3400          --type "~03|NEW~0D||LOAD HANOI~0D||||||SAVE HANOI2~0D" >/dev/null 2>&1
+    $PY tools/eosput.py $o/sb.dsk "$HANOI" HANOI --basic >/dev/null
+    $EMU --headless --disk $o/sb.dsk --frames 8000 --type-at 3400 \
+         --type "~03|NEW~0D||LOAD HANOI~0D||||||SAVE HANOI2~0D" >/dev/null 2>&1
     $PY tools/eosdir.py $o/sb.dsk --get HANOI $o/a.bin >/dev/null
     $PY tools/eosdir.py $o/sb.dsk --get HANOI2 $o/b.bin >/dev/null 2>&1
     cmp -s $o/a.bin $o/b.bin && pass sb_basic || fail sb_basic "HANOI2 missing or different"
@@ -69,10 +114,11 @@ t_sb_basic() {
 
 # CPM-Smartwriter Filter Utility: two disk drives, EOS file in, converted file out
 t_filter() {
+    need filter "$SB" "$FILTER" || return
     local o=$OUT/filter; mkdir -p $o; cp "$SB" $o/d5.dsk; rm -f $o/d6.dsk
     printf 'CP/M TEXT FILE\r\nSECOND LINE\twith a tab\r\n\x1a' > $o/cpm.txt
     $PY tools/eosput.py $o/d5.dsk $o/cpm.txt CPMTEXT >/dev/null
-    { cat "media/CPM-Smartwriter Filter Utility (1985)(Chesware)/CPM-Smartwriter Filter Utility (1985)(Chesware).bas"; printf 'RUN\r\n'; } > $o/run.txt
+    { cat "$FILTER"; printf 'RUN\r\n'; } > $o/run.txt
     $EMU --headless --disk $o/d5.dsk --disk2 $o/d6.dsk --disk-new --frames 45000 --type-at 3400 --type "~03|NEW~0D||" \
          --type-file $o/run.txt --type-after "|||x|||||CPMTEXT~0D|||SWTEXT~0D" >/dev/null 2>&1
     $PY tools/eosdir.py $o/d6.dsk --dump 2 | head -2 | grep -q "SECOND LINE with" && pass filter || fail filter "SWTEXT missing or wrong"
@@ -82,6 +128,7 @@ t_filter() {
 # written through EOS and found where the ROM's mapping puts them
 floppy() {   # name rom bytes blocks fmtblock spt layout
     local name=$1 rom=$2 size=$3 nb=$4 fb=$5 spt=$6 layout=$7
+    need fdc_$name "$SB" "$rom" || return
     local o=$OUT/fdc_$name; mkdir -p $o; cp "$SB" $o/sb.dsk
     head -c $size /dev/zero > $o/d2.dsk
     $PY tests/tools/mkfmt.py $o/fmt.txt $nb $fb T$name
@@ -121,10 +168,9 @@ t_vdp_prof() {
 # Final Fantasy on ColecoVision + SGM + MegaCart 512K (the user's own build of the coleco-ff
 # port, BYOA): through the legend, class select and menus to the overworld, on a ColecoVision
 # and on an ADAM; the party (4 layered sprites) must stand at the same place in both
-FF="media/ColecoFF slice78/slice78_mc512.rom"
 t_ff_sgm() {
+    need ff_sgm "$FF" || return
     local o=$OUT/ff_sgm; mkdir -p $o
-    [ -f "$FF" ] || { echo "SKIP ff_sgm: no $FF"; return; }
     $EMU --headless --coleco --sgm --cart "$FF" --joy tests/media/ff_overworld.joy --frames 2800 --dump-vram $o/cv.bin >/dev/null 2>&1
     $EMU --headless --sgm --cart "$FF" --joy tests/media/ff_overworld.joy --frames 2800 --dump-vram $o/adam.bin >/dev/null 2>&1
     local r
@@ -141,15 +187,14 @@ for f in sys.argv[1:]:
 # Log Maker (CP/M, the user's .lbr): LBR + CrLZH decompression (checksums), the files copied
 # to a CP/M data disk, LOGMAKER.COM run under CP/M 2.2 from drive B, the chat script it
 # writes read back from the disk
-LM="media/Log Maker (19xx)(-)/Log Maker (19xx)(-).lbr"
-CPM="media/CP-M 2.2 & Assembler (1984) (Coleco)/CP-M 2.2 & Assembler (1984) (Coleco).dsk"
 t_logmaker() {
+    need logmaker "$LM" "$CPM" || return
     local o=$OUT/logmaker; rm -rf $o; mkdir -p $o
-    [ -f "$LM" ] && [ -f "$CPM" ] || { echo "SKIP logmaker: no $LM or $CPM"; return; }
     $PY tools/lbr.py x "$LM" $o/x | grep -q "LOGMAKER.COM .*checksum OK" || { fail logmaker "decompression"; return; }
     cp "$CPM" $o/a.dsk; $PY tools/cpmdisk.py new $o/b.dsk
     for f in LOGMAKER.COM LOGMAKER.HLP MODINIT; do $PY tools/cpmdisk.py put $o/b.dsk $o/x/$f >/dev/null; done
-    $EMU --headless --disk $o/a.dsk --disk2 $o/b.dsk --frames 7000 --type-at 700          --type "B:~0D|||LOGMAKER ELEPHANT 619-270-3148~0D|||||||||||||||Y||||||||||N" >/dev/null 2>&1
+    $EMU --headless --disk $o/a.dsk --disk2 $o/b.dsk --frames 7000 --type-at 700 \
+         --type "B:~0D|||LOGMAKER ELEPHANT 619-270-3148~0D|||||||||||||||Y||||||||||N" >/dev/null 2>&1
     $PY tools/cpmdisk.py get $o/b.dsk ELEP. $o/ELEP.txt >/dev/null 2>&1
     grep -q "atdt6192703148" $o/ELEP.txt 2>/dev/null && pass logmaker || fail logmaker "no chat script on drive B"
 }
@@ -164,10 +209,11 @@ t_fdc_a720()    { floppy a720    "$R/a720dipi 7607 mmsg =c= 1988.u10"      73728
 t_fdc_1440hd()  { floppy 1440hd  "$R/1440k micro innovations hd-dd.u10"    1474560 1440 FACE 18 1440; }
 t_fdc_1440dd()  { floppy 1440dd  "$R/1440k micro innovations hd-dd.u10"    737280  720  FACF 9  720; }
 
-ALL="sgm_ay vdp_prof ff_sgm logmaker sb_devices sw_print tape_store sb_typein sb_basic filter fdc_std fdc_320ta fdc_dbl fdc_pmhd fdc_fast fdc_a720 fdc_1440hd fdc_1440dd"
+ALL="sgm_ay vdp_prof ff_sgm logmaker tape_boot tape_rw sb_devices sw_print tape_store sb_typein sb_basic filter fdc_std fdc_320ta fdc_dbl fdc_pmhd fdc_fast fdc_a720 fdc_1440hd fdc_1440dd"
 [ $# -gt 0 ] && ALL="$*"
 for t in $ALL; do t_$t > $OUT/$t.result 2>&1 & done
 wait
 status=0
 for t in $ALL; do cat $OUT/$t.result; grep -q "^PASS\|^SKIP" $OUT/$t.result || status=1; done
+echo "$(cat $(for t in $ALL; do echo $OUT/$t.result; done) | grep -c '^PASS') passed, $(cat $(for t in $ALL; do echo $OUT/$t.result; done) | grep -c '^SKIP') skipped"
 exit $status

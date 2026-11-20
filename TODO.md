@@ -171,7 +171,7 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
   (~56 persi su 256).
 - FF1: i ~1000 byte di `__tms9918_setup_mode2_pattern` (z88dk) scritti a schermo acceso danno
   54 byte probabilmente persi e 41 al limite; il resto del gioco non ha richieste in anticipo.
-  Aggiunto a `D:\Homebrew5\ColecoFF\ADAMPC_FINDINGS.md`.
+  Aggiunto a `ADAMPC_FINDINGS.md` nel repository di coleco-ff.
 
 ## Sessione del 2026-11-20 (seguito): Log Maker, dischi CP/M, CrLZH
 
@@ -259,7 +259,7 @@ dei 6801 (`tools/gendis.sh`); `build/dz80` per lo Z80.
 ## SGM e FF1 (fatto nella sessione 3), poi il kit Apple II
 
 - SGM, MegaCart, modalità ColecoVision e profilatore: fatti (vedi la sessione 3). FF1 slice78
-  (`media/ColecoFF slice78/`, copia della build in `D:\Homebrew5\ColecoFF\build`) è il banco
+  (`media/ColecoFF slice78/`, copia della build di coleco-ff) è il banco
   di prova e l'oracolo del futuro kit game-agnostic NES -> Coleco SGM; l'ADAM come target è
   quasi gratis (stessi VDP, PSG, Z80; più RAM; l'AY con l'SGM o l'ADAM Sound Enhancer).
 - **Dopo SGM/FF1: kit game-agnostic Apple II -> ADAM, banco di prova Wizardry I.** BYOA: il repo
