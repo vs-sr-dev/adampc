@@ -266,10 +266,38 @@ blocchi marcatore scritti e riletti sul cilindro/faccia/settore previsto dalla m
   e Golf scarta i tasti battuti durante i caricamenti. Nessun problema della tastiera emulata.
 - **CP/M 2.2 Coleco** (disco): `A>`, `DIR`; **WordStar** dal drive B: parte (lo schermo CP/M dell'ADAM
   è una finestra di ~36 colonne su un buffer di 80, quindi WordStar si vede "a fette").
+- **Log Maker** (CP/M, `.lbr` con membri CrLZH): estratto e decompresso con `tools/lbr.py`, copiato
+  su un disco dati CP/M con `tools/cpmdisk.py`, `LOGMAKER.COM` (BASIC compilato) gira da B: e scrive
+  il suo script per QTERM sul disco, letto poi dall'host.
 - Un tasto premuto mentre un programma lavora può essere consumato dal programma stesso
   (CP/M: un tasto interrompe `DIR`; SmartBASIC perde il primo tasto dopo `NEW`): sul bus la tastiera
   lo spedisce correttamente, quindi non è la tastiera emulata. Da verificare se SmartBASIC lo fa
   anche sull'hardware vero.
+
+## CP/M 2.2 Coleco: il disco
+
+DPB del drive da 160K nel BIOS (`DISK_INIT_TABLE` nel sorgente ricostruito di N. Brunori, `media/`):
+SPT 8 (una "traccia" CP/M = un blocco ADAM da 1K), BSH 3 / BLM 7 (blocchi da 1K), EXM 0,
+DSM 146, DRM 63 (64 voci, AL0 = C0: blocchi 0-1), CKS 16, OFF 13. Quindi il blocco CP/M n è il
+blocco ADAM 13 + n (i primi 13 sono il sistema), e il blocco ADAM passa per l'interleave del
+controller come per EOS. Una seconda tabella (`UNK_DDC5`: DSM 0x37, DRM 0x1F, AL0 = 80, OFF 0) è
+probabilmente quella del data pack. Verificato leggendo le directory dei dischi CP/M e WordStar.
+
+## CrLZH (formato dei `.?Y?` di Log Maker)
+
+Roger Warren, 1989-1991, `LZHREL.DOC` dentro `CRLZH20.LBR`: struttura dei file come CRUNCH di
+S. Greenberg (`76 FD`, nome, `[commento]`, `00`, revisione, revisione significativa, tipo di
+controllo, `05`), codifica LZHUF di Okumura/Yoshizaki (1988). I dettagli della versione 2 non sono
+scritti da nessuna parte: trovati qui decodificando file veri e confermati dal checksum finale
+(somma a 16 bit dei dati, little-endian, sul confine di byte dopo il codice di fine):
+finestra di 2048 byte (LZHUF: 4096) piena di spazi, scrittura da 2048 - 60; Huffman adattivo su
+315 simboli: 0-255 byte, **256 fine file**, 257-314 copie da 3 a 60; posizione su 11 bit, i 6 alti
+col codice fisso di LZHUF (3-8 bit), i **5 bassi** in chiaro; la copia parte da r - posizione - 1.
+Percorso: con 314 simboli i letterali venivano sbagliati, con 315 giusti; la prima posizione
+occupava 8 bit e non 9 (quindi 5 bit bassi); la lunghezza minima 3 e il codice 256 libero sono
+venuti dal punto in cui finisce il riempimento `^Z` del file. Verificato su tutti i membri di Log
+Maker e di `CRLZH20.LBR` (compressi dall'autore). Non esercitata: la ricostruzione dell'albero dopo
+32768 simboli (un errore lì si vedrebbe come checksum sbagliato).
 
 ## SmartBASIC 1.2 (disco "enhanced routines 1987 U.K. ADAM Subscribers")
 

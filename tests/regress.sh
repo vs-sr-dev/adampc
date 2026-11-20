@@ -127,6 +127,22 @@ for f in sys.argv[1:]:
     [ $? = 0 ] && pass ff_sgm || fail ff_sgm "$r"
 }
 
+# Log Maker (CP/M, the user's .lbr): LBR + CrLZH decompression (checksums), the files copied
+# to a CP/M data disk, LOGMAKER.COM run under CP/M 2.2 from drive B, the chat script it
+# writes read back from the disk
+LM="media/Log Maker (19xx)(-)/Log Maker (19xx)(-).lbr"
+CPM="media/CP-M 2.2 & Assembler (1984) (Coleco)/CP-M 2.2 & Assembler (1984) (Coleco).dsk"
+t_logmaker() {
+    local o=$OUT/logmaker; rm -rf $o; mkdir -p $o
+    [ -f "$LM" ] && [ -f "$CPM" ] || { echo "SKIP logmaker: no $LM or $CPM"; return; }
+    $PY tools/lbr.py x "$LM" $o/x | grep -q "LOGMAKER.COM .*checksum OK" || { fail logmaker "decompression"; return; }
+    cp "$CPM" $o/a.dsk; $PY tools/cpmdisk.py new $o/b.dsk
+    for f in LOGMAKER.COM LOGMAKER.HLP MODINIT; do $PY tools/cpmdisk.py put $o/b.dsk $o/x/$f >/dev/null; done
+    $EMU --headless --disk $o/a.dsk --disk2 $o/b.dsk --frames 7000 --type-at 700          --type "B:~0D|||LOGMAKER ELEPHANT 619-270-3148~0D|||||||||||||||Y||||||||||N" >/dev/null 2>&1
+    $PY tools/cpmdisk.py get $o/b.dsk ELEP. $o/ELEP.txt >/dev/null 2>&1
+    grep -q "atdt6192703148" $o/ELEP.txt 2>/dev/null && pass logmaker || fail logmaker "no chat script on drive B"
+}
+
 R=roms/adam_fdc
 t_fdc_std()     { floppy std     "$R/adam disk u10 ad 31 rev a 09-27-84.u10" 163840  160  FACE 8  std; }
 t_fdc_320ta()   { floppy 320ta   "$R/320ta.u10"                            327680  320  FACE 8  320; }
@@ -137,7 +153,7 @@ t_fdc_a720()    { floppy a720    "$R/a720dipi 7607 mmsg =c= 1988.u10"      73728
 t_fdc_1440hd()  { floppy 1440hd  "$R/1440k micro innovations hd-dd.u10"    1474560 1440 FACE 18 1440; }
 t_fdc_1440dd()  { floppy 1440dd  "$R/1440k micro innovations hd-dd.u10"    737280  720  FACF 9  720; }
 
-ALL="sgm_ay vdp_prof ff_sgm sb_devices sw_print tape_store sb_typein filter fdc_std fdc_320ta fdc_dbl fdc_pmhd fdc_fast fdc_a720 fdc_1440hd fdc_1440dd"
+ALL="sgm_ay vdp_prof ff_sgm logmaker sb_devices sw_print tape_store sb_typein filter fdc_std fdc_320ta fdc_dbl fdc_pmhd fdc_fast fdc_a720 fdc_1440hd fdc_1440dd"
 [ $# -gt 0 ] && ALL="$*"
 for t in $ALL; do t_$t > $OUT/$t.result 2>&1 & done
 wait

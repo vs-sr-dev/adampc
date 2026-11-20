@@ -31,7 +31,7 @@ people writing ColecoVision/ADAM software (see "Profiling").
 
 Runs: SmartWriter (typewriter and word processor, printing, STORE/GET on tape), SmartLOGO
 (tape), SmartBASIC 1.2 (disk and tape, SAVE/LOAD, typed-in listings), CP/M 2.2 + WordStar,
-Adam Links Golf, Market Monitor; the coleco-ff port of Final Fantasy (SGM + 512K MegaCart) on
+Adam Links Golf, Market Monitor, Log Maker (CP/M); the coleco-ff port of Final Fantasy (SGM + 512K MegaCart) on
 both the ColecoVision and the ADAM.
 
 ## Bring your own files
@@ -90,6 +90,16 @@ the AdamNet master), `--dump-ram FILE`.
 Disk images are written back when changed. Drop a `.dsk` on the window to put it in drive 1.
 `tools/eosdir.py IMAGE` lists the EOS directory of a disk or tape image (standard 160K layout),
 `tools/eosput.py IMAGE HOSTFILE NAME` copies a file into one.
+
+CP/M disks: `tools/cpmdisk.py dir|get|put|era|new IMAGE ...` reads and writes files on an ADAM
+CP/M 2.2 disk (160K; the disk parameter block of the ADAM BIOS). `tools/lbr.py list|x LIB.LBR`
+opens CP/M libraries and decompresses their CrLZH members (`.?Y?`, Roger Warren's LZH, version 2,
+checksum verified); `tools/lbr.py unlzh FILE` does a single file. For example, Log Maker:
+
+    python tools/lbr.py x "Log Maker.lbr" lm
+    python tools/cpmdisk.py new b.dsk
+    python tools/cpmdisk.py put b.dsk lm/LOGMAKER.COM
+    build/adampc --disk cpm_system.dsk --disk2 b.dsk      # A>B:  then  LOGMAKER bbsname number
 
 A `.ddp` image (256 x 1K blocks) is written back when the emulated machine changed it. Tape access runs at the real
 speed of the drive (a block every ~0.9 s, ~20 s to boot from a tape whose block 0 sits mid-tape)
@@ -169,6 +179,7 @@ Z80 routine, its tables fit SmartBASIC's 31 columns. With your copy of the disk:
     tests/regress.sh          # real software end to end (needs the images in media/):
                               # printing, tape STORE, typed-in BASIC, two-drive file
                               # conversion, format + block mapping of every disk ROM;
+                              # Log Maker from its .lbr to a script written under CP/M;
                               # AY frequencies and the profiler on hand-assembled
                               # cartridges; Final Fantasy (coleco-ff) to the overworld
 

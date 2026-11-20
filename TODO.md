@@ -173,6 +173,22 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
   54 byte probabilmente persi e 41 al limite; il resto del gioco non ha richieste in anticipo.
   Aggiunto a `D:\Homebrew5\ColecoFF\ADAMPC_FINDINGS.md`.
 
+## Sessione del 2026-11-20 (seguito): Log Maker, dischi CP/M, CrLZH
+
+- `tools/cpmdisk.py` (dir/get/put/era/new): DPB del BIOS CP/M ADAM letto nel sorgente ricostruito
+  (OFF 13, blocchi da 1K, 64 voci), verificato sulle directory dei dischi CP/M e WordStar.
+- `tools/lbr.py`: librerie LBR + decompressore CrLZH v2. La documentazione del formato
+  (`LZHREL.DOC`) dice solo "LZHUF con la struttura di CRUNCH"; i parametri della v2 sono stati
+  ricavati sperimentando sui file e confermati dal checksum (dettagli in docs/RECON.md).
+  Funziona su tutti i membri di Log Maker e del pacchetto CRLZH20 dell'autore.
+- Prima idea scartata: far girare `UCRLZH20.COM` (scaricato) sotto CP/M nell'emulatore; il
+  classificatore dei permessi l'ha bloccato (binario scaricato da internet), quindi strada
+  empirica con verifica del checksum. Nessun binario scaricato è stato eseguito.
+- **Log Maker gira**: `LOGMAKER.COM` (BASIC compilato) sotto CP/M 2.2 dal drive B:, scrive lo
+  script di chat per QTERM sul disco, l'host lo rilegge. Prova `logmaker` in `tests/regress.sh`.
+- Insidie: `DIR` di CP/M si interrompe a un tasto premuto; un tasto battuto mentre un `.COM` grande
+  si carica va perso (tempi del typer, non dell'emulatore).
+
 ## Domande aperte
 
 - **GAME sul disco SmartBASIC**: "?NEXT without FOR in 100"; il blocco 42 contiene un altro
@@ -211,9 +227,8 @@ Seguiti possibili del profilatore:
 
 Poi le rifiniture, nessuna bloccante:
 
-1. **Log Maker** (`.lbr` CP/M): i membri sono compressi LZH (crunch, firma `76 FD`): servono un
-   decompressore (strumento Python) e uno strumento per scrivere file su un disco CP/M ADAM
-   (parametri del DPB nel sorgente CP/M di `media/`).
+1. ~~Log Maker~~: fatto (`tools/lbr.py`, `tools/cpmdisk.py`). Restano: CrLZH v1, squeeze e
+   crunch (`76 FF`, `76 FE`) se se ne trovano; `cpmdisk.py` per le altre ROM del floppy.
 2. Cartucce: provare giochi ColecoVision (serve materiale di test), header 55AA/AA55, ROM di
    espansione 66 99.
 3. Precisione: wait state (M1, PSG), collisioni sul bus AdamNet,
