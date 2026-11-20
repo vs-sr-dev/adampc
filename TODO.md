@@ -228,8 +228,10 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
 ## Prossimi passi
 
 **Fatto nella sessione 3: Super Game Module + profilazione VDP + slot del VDP** (sopra).
-Ordine deciso il 2026-11-20: punti 1 (Log Maker) e 6 (tokenizzatore SmartBASIC), poi il repo
-pronto per la pubblicazione; il kit Apple II -> ADAM in una pipeline separata, con un handoff.
+Fatto il 2026-11-20, nell'ordine deciso: punti 1 (Log Maker) e 6 (listati SmartBASIC), repo
+pubblicato su https://github.com/vs-sr-dev/adampc (MIT, ramo `main`; storia riscritta senza
+gli zex di terzi). Il kit Apple II -> ADAM è una pipeline separata, con un suo repository; il
+suo handoff riassume cosa offre adamPC come banco di prova.
 Seguiti possibili del profilatore:
 - profilatore nella finestra: grafico del tempo di frame sovrapposto, righe con sprite persi
   evidenziate;
