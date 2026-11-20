@@ -232,6 +232,18 @@ Fatto il 2026-11-20, nell'ordine deciso: punti 1 (Log Maker) e 6 (listati SmartB
 pubblicato su https://github.com/vs-sr-dev/adampc (MIT, ramo `main`; storia riscritta senza
 gli zex di terzi). Il kit Apple II -> ADAM è una pipeline separata, con un suo repository; il
 suo handoff riassume cosa offre adamPC come banco di prova.
+**Prossimo progetto proposto (2026-11-20): il modem.** Continuazione naturale del lavoro sui
+modem di Pippin (pippin-homebrew: seriale su DBDMA, prima del supporto in DingusPPC) e CD-i
+(cdinet, browser via proxy sulla seriale):
+- **ADAMlink**, la scheda modem Coleco a 300 baud (Bell 103, composizione automatica) nello slot
+  #1: porte 0x5E (dati) e 0x5F (controllo/stato). Da cercare: la documentazione del chip e dei
+  registri, e il software ADAMlink Telecommunicator (data pack) come banco di prova.
+- In alternativa o in aggiunta, una scheda seriale nello slot #2 (porte 0x44-0x47 o 2681) con un
+  modem Hayes emulato: è la configurazione di QTERM sotto CP/M, quindi anche di Log Maker.
+- Ponte TCP sull'host: `ATDT` verso un host:porta telnet, così l'ADAM emulato chiama le BBS
+  ancora vive. Il nodo AdamNet 0x0B (il modem esterno da 1200 baud mai uscito) resta un'idea a parte.
+- FrogFind escluso: a 300 baud e su 31 colonne, il web passa solo da un proxy testuale stile cdinet.
+
 Seguiti possibili del profilatore:
 - profilatore nella finestra: grafico del tempo di frame sovrapposto, righe con sprite persi
   evidenziate;
