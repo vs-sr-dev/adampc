@@ -132,7 +132,8 @@ summary at exit (in the window, running totals go in the title bar):
   or HALT); frames that never reach it are overruns. Also the NMI handler's time.
 - **Races:** an NMI handler that touches the VDP control port between the main program's two
   address bytes, or moves the address under a transfer in progress; status reads outside the
-  NMI handler that take a set frame flag.
+  NMI handler that take a set frame flag; an NMI handler that returns with another MegaCart
+  bank mapped than the one it interrupted (the main program then reads the wrong bank).
 
 `--prof-csv FILE` writes the same frame by frame, `--prof-log N` prints the first N risky
 accesses, `--prof-from N` (headless) starts at frame N. `--prof-pc FILE` counts Z80 cycles per

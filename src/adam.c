@@ -688,6 +688,7 @@ static void run_until(Adam *a, uint64_t end_ps)
                 a->vdp_kind = -1;
                 int c = z80_step(&a->z80);
                 vdpprof_pc(&a->prof, pc0, bank0, c);
+                a->prof.cur_bank = a->cart_banks > 2 ? a->cart_bank : -1;
                 if (nmi) vdpprof_nmi(&a->prof, &a->vdp, pc0, a->z80.sp.w, a->z80_ps);
                 else {
                     if (a->vdp_kind >= 0) {

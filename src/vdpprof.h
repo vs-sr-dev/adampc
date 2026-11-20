@@ -56,21 +56,24 @@ typedef struct VdpProf {
     uint64_t nmi_start_ps, nmi_ps;
     int nmi_latch_half;            /* NMI arrived between the two control bytes */
     int nmi_touched_ctrl;
+    int cur_bank;                  /* MegaCart bank now (-1 = no MegaCart), set by the machine */
+    int nmi_bank;                  /* bank the NMI interrupted */
     int addr_clobbered;            /* handler moved the address under the main program */
     uint16_t clobber_main_pc;
 
     /* per-interval counters (frame flag to frame flag) */
-    uint32_t n_access, n_hard, n_risky, n_race, n_async;
+    uint32_t n_access, n_hard, n_risky, n_race, n_async, n_bankrace;
     double min_gap_us;
     uint32_t n_5s_lines, n_dropped;
 
     /* totals */
     uint64_t intervals, overruns;
     double busy_sum, busy_max, nmi_max_us;
-    uint64_t t_access, t_hard, t_risky, t_race, t_async, t_5s_lines, t_dropped, t_5s_frames;
+    uint64_t t_access, t_hard, t_risky, t_race, t_async, t_5s_lines, t_dropped, t_5s_frames, t_bankrace;
     double t_min_gap;
     VpSite sites[VP_SITES]; int nsites;
     VpSite races[16]; int nraces;
+    VpSite bankraces[16]; int nbankraces;   /* key: interrupted PC + the bank it had */
     VpSite asyncs[16]; int nasync;
 
     /* --prof-pc: Z80 cycles per instruction address; 0x0000-0xBFFF direct, then the

@@ -17,7 +17,7 @@ void vdpprof_init(VdpProf *p)
     p->min_gap_us = p->t_min_gap = 1e9;
     if (p->csv)
         fprintf(p->csv, "frame,interval_us,busy_us,busy_pct,overrun,nmi_us,vram_accesses,hard,risky,min_gap_us,"
-                        "races,async_status,lines_over4,sprites_dropped\n");
+                        "races,async_status,lines_over4,sprites_dropped,bank_races\n");
 }
 
 /* worst case wait after a transfer request made at time t (µs into the frame) */
@@ -100,6 +100,7 @@ void vdpprof_nmi(VdpProf *p, const TMS9918 *v, uint16_t main_pc, uint16_t sp1, u
     p->nmi_start_ps = t;
     p->nmi_latch_half = v->latch_full;
     p->nmi_touched_ctrl = 0;
+    p->nmi_bank = p->cur_bank;
 }
 
 void vdpprof_step(VdpProf *p, uint16_t pc0, uint16_t pc1, uint16_t sp1, int halted, uint64_t t)
@@ -109,6 +110,18 @@ void vdpprof_step(VdpProf *p, uint16_t pc0, uint16_t pc1, uint16_t sp1, int halt
             p->in_nmi = 0;
             p->nmi_ps += t - p->nmi_start_ps;
             if (p->nmi_touched_ctrl) { p->addr_clobbered = 1; p->clobber_main_pc = p->nmi_main_pc; }
+            /* the handler switched MegaCart banks and did not put back the one it found: the
+             * main program resumes reading from another bank */
+            if (p->nmi_bank >= 0 && p->cur_bank != p->nmi_bank) {
+                p->n_bankrace++;
+                VpSite *s = site(p->bankraces, &p->nbankraces, 16, key_of(p->nmi_main_pc, p->nmi_bank));
+                if (s) s->hard++;
+                if (p->log_left > 0) {
+                    p->log_left--;
+                    fprintf(stderr, "[nmi] returned to PC=%04X with bank %d mapped, it interrupted bank %d\n",
+                            p->nmi_main_pc, p->cur_bank, p->nmi_bank);
+                }
+            }
             p->loop_streak = 0; p->idle = 0;
         }
         return;
@@ -144,19 +157,19 @@ void vdpprof_frame_flag(VdpProf *p, TMS9918 *v, uint64_t t, uint64_t frame_no)
         if (pct > p->busy_max) p->busy_max = pct;
         if (nmi_us > p->nmi_max_us) p->nmi_max_us = nmi_us;
         p->t_access += p->n_access; p->t_hard += p->n_hard; p->t_risky += p->n_risky;
-        p->t_race += p->n_race; p->t_async += p->n_async;
+        p->t_race += p->n_race; p->t_async += p->n_async; p->t_bankrace += p->n_bankrace;
         p->t_5s_lines += p->n_5s_lines; p->t_dropped += p->n_dropped;
         if (p->n_5s_lines) p->t_5s_frames++;
         if (p->min_gap_us < p->t_min_gap) p->t_min_gap = p->min_gap_us;
         if (p->csv)
-            fprintf(p->csv, "%llu,%.0f,%.0f,%.1f,%d,%.0f,%u,%u,%u,%.2f,%u,%u,%u,%u\n",
+            fprintf(p->csv, "%llu,%.0f,%.0f,%.1f,%d,%.0f,%u,%u,%u,%.2f,%u,%u,%u,%u,%u\n",
                     (unsigned long long)frame_no, interval, busy, pct, !idle_now, nmi_us, p->n_access, p->n_hard,
                     p->n_risky, p->min_gap_us < 1e8 ? p->min_gap_us : -1.0, p->n_race, p->n_async,
-                    p->n_5s_lines, p->n_dropped);
+                    p->n_5s_lines, p->n_dropped, p->n_bankrace);
     }
     p->fflag_ps = t;
     p->nmi_ps = 0;
-    p->n_access = p->n_hard = p->n_risky = p->n_race = p->n_async = p->n_5s_lines = p->n_dropped = 0;
+    p->n_access = p->n_hard = p->n_risky = p->n_race = p->n_async = p->n_5s_lines = p->n_dropped = p->n_bankrace = 0;
     p->min_gap_us = 1e9;
 }
 
@@ -197,6 +210,8 @@ void vdpprof_summary(VdpProf *p, FILE *out)
     print_sites(out, "where (main-program PC):", p->races, p->nraces, 0);
     fprintf(out, "  status reads outside the NMI handler that took a set frame flag: %llu\n", (unsigned long long)p->t_async);
     print_sites(out, "where:", p->asyncs, p->nasync, 0);
+    fprintf(out, "  NMI handler returned with another MegaCart bank mapped: %llu\n", (unsigned long long)p->t_bankrace);
+    print_sites(out, "where (interrupted PC, bank it had mapped):", p->bankraces, p->nbankraces, 0);
 }
 
 int vdpprof_write_pc(VdpProf *p, const char *path, int banked)

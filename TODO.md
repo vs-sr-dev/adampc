@@ -135,6 +135,14 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
     tiene la CPU piena per ~28 frame. Dove va il tempo durante la camminata (`--prof-pc` +
     profsym): 35% attesa del vblank, 22% `redraw_ow_view_from_banks`, 20% `ow_read_macro`, ~10%
     negli helper di sccz80 per lo stack (`l_gint*`), 2,4% `mc_select_bank`.
+  - **tile fuori posto in overworld** (viste dall'utente, "pezzi di altre parti della mappa"):
+    nuovo controllo del profilatore, *NMI che torna con un altro banco MegaCart*. Nella camminata
+    di prova: 168 volte in 2860 frame, sempre "interrotto il banco 6 (quadrante), tornato col banco
+    0". `audio_nmi_tick` rimette `main_bank`, non il banco che ha trovato; `ow_read_macro` e
+    `redraw_ow_view_from_banks` selezionano il quadrante e leggono qualche istruzione dopo, quindi
+    se l'NMI cade lì in mezzo la lettura prende il banco 0 allo stesso offset. Rimedio nel porting:
+    una copia in RAM del banco corrente (scritta *prima* della lettura di FFC0+N) e l'NMI che
+    rimette quella, non `main_bank`.
   - **transizioni**: aprendo/chiudendo il menu lo schermo resta acceso e per qualche frame la
     mappa si vede con le tile del font (la pattern table cambia prima della name table).
 - Insidie di questa sessione: le funzioni `static` di z88dk sono simboli *locali* nella .map
