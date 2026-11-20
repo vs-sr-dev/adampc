@@ -213,6 +213,11 @@ Written from public documents; the sources are listed in
 
 No other emulator's source code was used.
 
+## Licence
+
+MIT for the code, tools and documentation in this repository; see [LICENSE](LICENSE), which
+also says what the licence does not cover (the firmware and the software the emulator runs).
+
 ## Documentation
 
 - [docs/hardware_research.md](docs/hardware_research.md): hardware reference compiled from
