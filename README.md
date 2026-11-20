@@ -119,12 +119,17 @@ next line), so a game can be driven headless to the scene you want to look at.
 `--prof` watches what a TMS9918A program does that a forgiving emulator lets pass, and prints a
 summary at exit (in the window, running totals go in the title bar):
 
-- **VRAM access spacing.** TI's data manual (Table 2-2) gives the worst-case time the VDP may
-  need before it accepts the next transfer: 8 µs in Graphics I/II during the active display,
-  3.1 µs in Text, 3.5 µs in Multicolor, 2 µs with the screen blanked or in the 4300 µs after
-  the frame interrupt. Transfers closer than that are "risky": they work or lose a byte
-  depending on where the VDP's access windows fall. The report lists the instructions (PC and
-  MegaCart bank) that do it. OTIR (21 cycles = 5.9 µs) during the active display is the classic case.
+- **VRAM transfers, slot by slot.** The TMS9918A lets the CPU at the VRAM only in fixed slots
+  of each line: in Graphics I/II one every 16 memory cycles at worst, in Text one in three, in
+  the vertical border and with the screen off one in two (`src/vdpslots.h`, read by
+  `tools/vdpslots.py` off the openMSX timing diagram, which is built on TI's 1978 master timing
+  chart). A request is carried out in the first slot after a delay of about 2 µs (8-13 VDP
+  cycles, 11 most likely). A new request before that slot finds the previous transfer still
+  pending: "lost" (even with an 8-cycle delay), "likely lost" (11), "marginal" (12-13). The
+  model gives 28.7 Z80 cycles as the Graphics worst case and 11.3 for Text: the "29 cycles" and
+  "12 cycles" rules. The report lists the instructions (PC and MegaCart bank); OTIR (21 cycles)
+  during the active display is the classic case. What the chip does with the pending byte is not
+  documented, so nothing is dropped from VRAM.
 - **Sprites per line:** lines with more than four sprites and how many sprite-lines are lost.
   Sprites parked at Y = 0 are on screen (lines 1-16) and count; 0xD0 ends the table.
 - **Frame time:** the share of each frame from the frame interrupt to the program's idle loop

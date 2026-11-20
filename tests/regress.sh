@@ -94,13 +94,17 @@ t_sgm_ay() {
     [ $? = 0 ] && pass sgm_ay || fail sgm_ay "$r"
 }
 
-# VDP profiler: OTIR in the active display, five sprites on a line, idle loop (see the script)
+# VDP profiler, slot model: OTIR in the vertical border, a 30-cycle loop, the 27-cycle z88dk
+# loop and OTIR in the active display, five sprites on a line, idle loop (see the script)
 t_vdp_prof() {
     local o=$OUT/vdp_prof; mkdir -p $o
-    $PY tests/tools/vdptest.py rom $o/vdp.rom
-    $EMU --headless --coleco --cart $o/vdp.rom --frames 300 --prof-csv $o/p.csv >/dev/null 2>&1
-    local r; r=$($PY tests/tools/vdptest.py check $o/p.csv)
-    [ $? = 0 ] && pass vdp_prof || fail vdp_prof "$r"
+    local v r msg="" ok=1
+    for v in otir_vblank loop30 loop27 otir; do
+        $PY tests/tools/vdptest.py rom $v $o/$v.rom
+        $EMU --headless --coleco --cart $o/$v.rom --frames 300 --prof-csv $o/$v.csv >/dev/null 2>&1
+        r=$($PY tests/tools/vdptest.py check $v $o/$v.csv) || { ok=0; msg="$msg $r"; }
+    done
+    [ $ok = 1 ] && pass vdp_prof || fail vdp_prof "$msg"
 }
 
 # Final Fantasy on ColecoVision + SGM + MegaCart 512K (the user's own build of the coleco-ff

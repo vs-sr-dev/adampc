@@ -149,6 +149,30 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
   (all'inizio profsym attribuiva tutto a `svc_wait_vblank`: 77% invece di 35%); la .map dice però
   a quale funzione C appartiene ogni simbolo (`file.c::funzione::`), ed è quello che si usa ora.
 
+## Sessione del 2026-11-20 (seguito): timing del VDP dentro la riga
+
+- Fonte: l'articolo di openMSX "VDP VRAM timing, part 2" (W. Vermaelen, 2014) con il suo
+  diagramma, le cui righe TMS9918 sono ricostruite dal "9918 Master Timing" disegnato a mano da
+  TI nel 1978 (archivio di Karl Guttag) e dal manuale applicativo. Documentazione, nessun sorgente.
+- `tools/vdpslots.py` legge gli slot dal diagramma (colori dei riquadri, un riquadro = un accesso
+  di 2 cicli VDP) e scrive `src/vdpslots.h`: Graphics I/II 19 slot CPU per riga, al massimo 32
+  cicli VDP fra uno e l'altro (il "once every 16 memory cycles" del manuale); Text uno ogni 6;
+  bordo verticale uno ogni 4 (gli altri sono refresh). Multicolor: le letture della color table
+  date alla CPU (ipotesi dell'articolo, coerente col manuale).
+- Il profilatore ora calcola lo slot in cui il VDP esegue ogni trasferimento (ritardo 8/11/13
+  cicli VDP, il "2 µs" del manuale) e segnala una richiesta che arriva prima: persa / probabilmente
+  persa / al limite. Verifica di coerenza: caso peggiore Graphics 11 + 32 = 43 cicli VDP = 28,7
+  cicli Z80 (la regola dei 29), Text 11 + 6 = 17 = 11,3 (i 12 di Grauw).
+- Allineamento: il flag F cade al ciclo 319 della riga 191 (fine del display attivo), dove adamPC
+  chiude la sua riga 191. L'istante dell'I/O dentro l'istruzione ora è esatto (OUTI/OTIR al
+  ciclo 16, INI/INIR al 13, IN/OUT alla fine).
+- `tests/tools/vdptest.py`, quattro cartucce: OTIR nel bordo (niente perso), ciclo da 30 cicli
+  nel display (niente), ciclo da 27 di z88dk (~14 probabilmente persi su 256), OTIR nel display
+  (~56 persi su 256).
+- FF1: i ~1000 byte di `__tms9918_setup_mode2_pattern` (z88dk) scritti a schermo acceso danno
+  54 byte probabilmente persi e 41 al limite; il resto del gioco non ha richieste in anticipo.
+  Aggiunto a `D:\Homebrew5\ColecoFF\ADAMPC_FINDINGS.md`.
+
 ## Domande aperte
 
 - **GAME sul disco SmartBASIC**: "?NEXT without FOR in 100"; il blocco 42 contiene un altro
@@ -168,15 +192,17 @@ riscrive i supporti). Prima di ogni modifica ai tempi: `tests/regress.sh`.
   6000-7FFF (qui sì).
 - **Tabella dei volumi dell'AY**: passo di ~3 dB (16 livelli), non misurata; idem il rapporto
   di livello AY/SN76489 sul modulo vero.
-- **Finestre d'accesso del VDP dentro la riga**: il profilatore usa i casi peggiori del datasheet,
-  non la posizione esatta degli slot. Un ciclo da 27 cicli può funzionare sempre su una console
-  vera; per dire "si perde il byte" servirebbe il modello degli slot (o misure).
+- **Slot del VDP**: il diagramma è ricostruito dal disegno TI del 1978, non misurato; il ritardo
+  "2 µs" è fra 8 e 13 cicli VDP; non si sa cosa faccia il TMS9918 con un byte scavalcato (perso?
+  scritto all'indirizzo sbagliato?). Per questo adamPC segnala e non altera la VRAM. Una misura
+  su hardware vero (es. il VATT degli MSXisti, o un test su ColecoVision) chiuderebbe la questione.
 
 ## Prossimi passi
 
-**Fatto nella sessione 3: Super Game Module + profilazione VDP** (sopra). Seguiti possibili:
-- modello degli slot d'accesso del VDP dentro la riga (passa da "risky" a "perso davvero"),
-  insieme al punto 3 qui sotto (timing VDP intra-linea);
+**Fatto nella sessione 3: Super Game Module + profilazione VDP + slot del VDP** (sopra).
+Ordine deciso il 2026-11-20: punti 1 (Log Maker) e 6 (tokenizzatore SmartBASIC), poi il repo
+pronto per la pubblicazione; il kit Apple II -> ADAM in una pipeline separata, con un handoff.
+Seguiti possibili del profilatore:
 - profilatore nella finestra: grafico del tempo di frame sovrapposto, righe con sprite persi
   evidenziate;
 - altre scene di FF1 (battaglia, città, ponte) con script `--joy` presi dagli altri
@@ -190,7 +216,7 @@ Poi le rifiniture, nessuna bloccante:
    (parametri del DPB nel sorgente CP/M di `media/`).
 2. Cartucce: provare giochi ColecoVision (serve materiale di test), header 55AA/AA55, ROM di
    espansione 66 99.
-3. Precisione: wait state (M1, PSG), timing VDP intra-linea, collisioni sul bus AdamNet,
+3. Precisione: wait state (M1, PSG), collisioni sul bus AdamNet,
    stallo DMA applicato in tempo reale invece che a posteriori.
 4. Spinner (INT dello Z80), secondo controller, mappatura tasti configurabile.
 5. Software su nastro (giochi) e software che usi l'espansione di memoria, se se ne trovano.

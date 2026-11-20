@@ -1,11 +1,63 @@
 /* vdpprof.c - VDP / frame-time profiler. See vdpprof.h. */
 #include "vdpprof.h"
 #include "tms9918.h"
+#include "vdpslots.h"
+#include <math.h>
 #include <string.h>
 
-#define LINE_US   (228.0 / 3.579545)          /* one scanline in µs */
-#define ACTIVE_US (192.0 * LINE_US)           /* frame start to the frame flag */
-#define VBLANK_FREE_US 4300.0                 /* data manual: no waiting for 4300 µs after INT */
+#define PS_PER_VDP   (279365.0 / 1.5)          /* VDP cycle: 5.369 MHz, 1.5 per Z80 cycle */
+#define LINE_VDP     342
+#define FFLAG_CYCLE  319                       /* end of the active display: the frame flag */
+#define ALIGN        (LINE_VDP - FFLAG_CYCLE)  /* adamPC's line start is VDP cycle 319 of the line before */
+
+static const int delays[3] = { 8, 11, 13 };   /* "2 us" after a request: range and best guess */
+
+/* next[pattern][cycle]: first CPU slot starting at or after that cycle of the line, -1 none */
+enum { PAT_BORDER, PAT_GRAPHICS, PAT_MULTICOLOR, PAT_TEXT };
+static int16_t next_slot[4][LINE_VDP + 1];
+
+static void build_slots(void)
+{
+    char mc[172];
+    /* Multicolor reads no colour table: the article and the manual's "at least once out of
+     * every four memory cycles" give those reads to the CPU */
+    for (int i = 0; i < 171; i++) mc[i] = vdp_slots_character[i] == 'c' ? 'C' : vdp_slots_character[i];
+    const char *pat[4] = { vdp_slots_border, vdp_slots_character, mc, vdp_slots_text };
+    for (int k = 0; k < 4; k++) {
+        int nx = -1;
+        next_slot[k][LINE_VDP] = -1;
+        for (int c = LINE_VDP - 1; c >= 0; c--) {
+            /* entry i starts at cycle 2i + 1 (cycle 341 = entry 170) */
+            if ((c & 1) && pat[k][(c - 1) / 2] == 'C') nx = c;
+            next_slot[k][c] = (int16_t)nx;
+        }
+    }
+}
+
+static int line_pattern(const TMS9918 *v, long line)
+{
+    long l = ((line % 262) + 262) % 262;
+    if (!(v->reg[1] & 0x40)) return PAT_BORDER;                /* display off */
+    if (l >= 192 && l != 261) return PAT_BORDER;
+    if (v->reg[1] & 0x10) return PAT_TEXT;
+    if (v->reg[1] & 0x08) return PAT_MULTICOLOR;
+    return PAT_GRAPHICS;
+}
+
+/* time of the first CPU slot at or after time t (ps) */
+static uint64_t slot_after(const TMS9918 *v, uint64_t t, uint64_t frame_start)
+{
+    double u = ((double)t - (double)frame_start) / PS_PER_VDP - ALIGN;  /* VDP cycles from line 0, cycle 0 */
+    long cyc = (long)ceil(u);
+    for (int k = 0; k < 3; k++) {
+        long line = (long)floor((double)cyc / LINE_VDP);
+        int c = (int)(cyc - line * LINE_VDP);
+        int s = next_slot[line_pattern(v, line)][c];
+        if (s >= 0) return frame_start + (uint64_t)llround(((double)(line * LINE_VDP + s) + ALIGN) * PS_PER_VDP);
+        cyc = (line + 1) * LINE_VDP;
+    }
+    return t;
+}
 
 void vdpprof_init(VdpProf *p)
 {
@@ -15,19 +67,11 @@ void vdpprof_init(VdpProf *p)
     memset(p, 0, sizeof *p);
     p->csv = csv; p->log_left = log; p->enabled = 1; p->pc_cycles = pcc;
     p->min_gap_us = p->t_min_gap = 1e9;
+    p->cur_bank = -1;
+    build_slots();
     if (p->csv)
-        fprintf(p->csv, "frame,interval_us,busy_us,busy_pct,overrun,nmi_us,vram_accesses,hard,risky,min_gap_us,"
-                        "races,async_status,lines_over4,sprites_dropped,bank_races\n");
-}
-
-/* worst case wait after a transfer request made at time t (µs into the frame) */
-static double limit_us(const TMS9918 *v, double tf)
-{
-    if (!(v->reg[1] & 0x40)) return 2.0;                         /* blanked */
-    if (tf >= ACTIVE_US && tf < ACTIVE_US + VBLANK_FREE_US) return 2.0;
-    if (v->reg[1] & 0x10) return 3.1;                            /* text */
-    if (v->reg[1] & 0x08) return 3.5;                            /* multicolor */
-    return 8.0;                                                  /* graphics I / II */
+        fprintf(p->csv, "frame,interval_us,busy_us,busy_pct,overrun,nmi_us,vram_accesses,lost,likely_lost,marginal,"
+                        "min_gap_us,races,async_status,lines_over4,sprites_dropped,bank_races\n");
 }
 
 static VpSite *site(VpSite *tab, int *n, int cap, uint32_t key)
@@ -35,7 +79,7 @@ static VpSite *site(VpSite *tab, int *n, int cap, uint32_t key)
     for (int i = 0; i < *n; i++) if (tab[i].key == key) return &tab[i];
     if (*n == cap) return NULL;
     VpSite *s = &tab[(*n)++];
-    s->key = key; s->hard = s->risky = 0; s->min_gap_us = 1e9;
+    s->key = key; s->n = s->likely = s->marginal = 0; s->min_gap_us = 1e9;
     return s;
 }
 
@@ -45,13 +89,11 @@ static void race(VdpProf *p, uint16_t pc, int bank)
 {
     p->n_race++;
     VpSite *s = site(p->races, &p->nraces, 16, key_of(pc, bank));
-    if (s) s->hard++;
+    if (s) s->n++;
 }
 
 void vdpprof_access(VdpProf *p, const TMS9918 *v, int kind, uint64_t t, uint64_t frame_start, uint16_t pc, int bank)
 {
-    double tf = (double)(t - frame_start) / 1e6;
-
     /* --- races with the NMI handler --- */
     if (p->in_nmi) {
         if (kind != VP_DATA_W && kind != VP_DATA_R) {
@@ -65,7 +107,7 @@ void vdpprof_access(VdpProf *p, const TMS9918 *v, int kind, uint64_t t, uint64_t
     if (kind == VP_STATUS_F && !p->in_nmi && (v->reg[1] & 0x20)) {
         p->n_async++;
         VpSite *s = site(p->asyncs, &p->nasync, 16, key_of(pc, bank));
-        if (s) s->hard++;
+        if (s) s->n++;
     }
 
     /* --- VRAM transfer spacing --- */
@@ -74,21 +116,32 @@ void vdpprof_access(VdpProf *p, const TMS9918 *v, int kind, uint64_t t, uint64_t
     if (p->have_last) {
         double gap = (double)(t - p->last_ps) / 1e6;
         if (gap < p->min_gap_us) p->min_gap_us = gap;
-        int hard = gap < 2.0, risky = !hard && gap < p->last_limit_us;
-        if (hard || risky) {
-            if (hard) p->n_hard++; else p->n_risky++;
+        /* the previous transfer is still pending if its slot has not started yet */
+        int level = t < p->pend_ps[0] ? 3 : t < p->pend_ps[1] ? 2 : t < p->pend_ps[2] ? 1 : 0;
+        if (level) {
+            if (level == 3) p->n_lost++; else if (level == 2) p->n_likely++; else p->n_marginal++;
             VpSite *s = site(p->sites, &p->nsites, VP_SITES, key_of(pc, bank));
-            if (s) { if (hard) s->hard++; else s->risky++; if (gap < s->min_gap_us) s->min_gap_us = gap; }
+            if (s) {
+                if (level == 3) s->n++; else if (level == 2) s->likely++; else s->marginal++;
+                if (gap < s->min_gap_us) s->min_gap_us = gap;
+            }
             if (p->log_left > 0) {
+                static const char *what[4] = { "", "marginal   ", "likely lost", "lost       " };
+                double u = ((double)t - (double)frame_start) / PS_PER_VDP - ALIGN;
+                long line = (long)floor(u / LINE_VDP);
                 p->log_left--;
-                fprintf(stderr, "[vdp] %s %s at line %3d: %.2f us after the previous transfer (needs %.1f)  PC=%04X%s",
-                        hard ? "HARD " : "risky", kind == VP_DATA_W ? "write" : kind == VP_DATA_R ? "read " : "setup",
-                        (int)(tf / LINE_US), gap, hard ? 2.0 : p->last_limit_us, pc, bank >= 0 ? "" : "\n");
+                /* the slot of the previous transfer, with the delay that makes this request too early */
+                fprintf(stderr, "[vdp] %s: %s %.2f us after the previous request, line %ld cycle %ld, the previous "
+                        "transfer's slot (%d-cycle delay) %.2f us later  PC=%04X%s", what[level],
+                        kind == VP_DATA_W ? "write" : kind == VP_DATA_R ? "read " : "setup", gap, line,
+                        (long)(u - line * LINE_VDP), delays[3 - level],
+                        ((double)p->pend_ps[3 - level] - (double)t) / 1e6, pc, bank >= 0 ? "" : "\n");
                 if (bank >= 0) fprintf(stderr, " bank %d\n", bank);
             }
         }
     }
-    p->last_ps = t; p->last_limit_us = limit_us(v, tf); p->have_last = 1;
+    for (int i = 0; i < 3; i++) p->pend_ps[i] = slot_after(v, t + (uint64_t)llround(delays[i] * PS_PER_VDP), frame_start);
+    p->last_ps = t; p->have_last = 1;
 }
 
 void vdpprof_nmi(VdpProf *p, const TMS9918 *v, uint16_t main_pc, uint16_t sp1, uint64_t t)
@@ -115,7 +168,7 @@ void vdpprof_step(VdpProf *p, uint16_t pc0, uint16_t pc1, uint16_t sp1, int halt
             if (p->nmi_bank >= 0 && p->cur_bank != p->nmi_bank) {
                 p->n_bankrace++;
                 VpSite *s = site(p->bankraces, &p->nbankraces, 16, key_of(p->nmi_main_pc, p->nmi_bank));
-                if (s) s->hard++;
+                if (s) s->n++;
                 if (p->log_left > 0) {
                     p->log_left--;
                     fprintf(stderr, "[nmi] returned to PC=%04X with bank %d mapped, it interrupted bank %d\n",
@@ -156,20 +209,20 @@ void vdpprof_frame_flag(VdpProf *p, TMS9918 *v, uint64_t t, uint64_t frame_no)
         p->busy_sum += pct;
         if (pct > p->busy_max) p->busy_max = pct;
         if (nmi_us > p->nmi_max_us) p->nmi_max_us = nmi_us;
-        p->t_access += p->n_access; p->t_hard += p->n_hard; p->t_risky += p->n_risky;
+        p->t_access += p->n_access; p->t_lost += p->n_lost; p->t_likely += p->n_likely; p->t_marginal += p->n_marginal;
         p->t_race += p->n_race; p->t_async += p->n_async; p->t_bankrace += p->n_bankrace;
         p->t_5s_lines += p->n_5s_lines; p->t_dropped += p->n_dropped;
         if (p->n_5s_lines) p->t_5s_frames++;
         if (p->min_gap_us < p->t_min_gap) p->t_min_gap = p->min_gap_us;
         if (p->csv)
-            fprintf(p->csv, "%llu,%.0f,%.0f,%.1f,%d,%.0f,%u,%u,%u,%.2f,%u,%u,%u,%u,%u\n",
-                    (unsigned long long)frame_no, interval, busy, pct, !idle_now, nmi_us, p->n_access, p->n_hard,
-                    p->n_risky, p->min_gap_us < 1e8 ? p->min_gap_us : -1.0, p->n_race, p->n_async,
+            fprintf(p->csv, "%llu,%.0f,%.0f,%.1f,%d,%.0f,%u,%u,%u,%u,%.2f,%u,%u,%u,%u,%u\n",
+                    (unsigned long long)frame_no, interval, busy, pct, !idle_now, nmi_us, p->n_access, p->n_lost,
+                    p->n_likely, p->n_marginal, p->min_gap_us < 1e8 ? p->min_gap_us : -1.0, p->n_race, p->n_async,
                     p->n_5s_lines, p->n_dropped, p->n_bankrace);
     }
     p->fflag_ps = t;
     p->nmi_ps = 0;
-    p->n_access = p->n_hard = p->n_risky = p->n_race = p->n_async = p->n_5s_lines = p->n_dropped = p->n_bankrace = 0;
+    p->n_access = p->n_lost = p->n_likely = p->n_marginal = p->n_race = p->n_async = p->n_5s_lines = p->n_dropped = p->n_bankrace = 0;
     p->min_gap_us = 1e9;
 }
 
@@ -179,7 +232,7 @@ static void print_sites(FILE *out, const char *title, VpSite *tab, int n, int wi
     /* most frequent first */
     for (int i = 0; i < n; i++)
         for (int j = i + 1; j < n; j++)
-            if (tab[j].hard + tab[j].risky > tab[i].hard + tab[i].risky) { VpSite x = tab[i]; tab[i] = tab[j]; tab[j] = x; }
+            if (tab[j].n + tab[j].likely + tab[j].marginal > tab[i].n + tab[i].likely + tab[i].marginal) { VpSite x = tab[i]; tab[i] = tab[j]; tab[j] = x; }
     fprintf(out, "  %s\n", title);
     for (int i = 0; i < n && i < 12; i++) {
         uint16_t pc = (uint16_t)tab[i].key;
@@ -187,9 +240,10 @@ static void print_sites(FILE *out, const char *title, VpSite *tab, int n, int wi
         char b[16] = "";
         if (bank >= 0) snprintf(b, sizeof b, " bank %2d", bank);
         if (with_gap)
-            fprintf(out, "    PC %04X%s: %u hard, %u risky, closest %.2f us\n", pc, b, tab[i].hard, tab[i].risky, tab[i].min_gap_us);
+            fprintf(out, "    PC %04X%s: %u lost, %u likely lost, %u marginal, closest %.2f us\n", pc, b,
+                    tab[i].n, tab[i].likely, tab[i].marginal, tab[i].min_gap_us);
         else
-            fprintf(out, "    PC %04X%s: %u\n", pc, b, tab[i].hard);
+            fprintf(out, "    PC %04X%s: %u\n", pc, b, tab[i].n);
     }
 }
 
@@ -200,10 +254,11 @@ void vdpprof_summary(VdpProf *p, FILE *out)
     fprintf(out, "  frame time: average %.1f%% busy, worst %.1f%%, %llu frames overran (no idle loop at the next frame flag)\n",
             p->busy_sum / (double)p->intervals, p->busy_max, (unsigned long long)p->overruns);
     fprintf(out, "  NMI handler: longest %.0f us per frame\n", p->nmi_max_us);
-    fprintf(out, "  VRAM transfers: %llu, %llu hard (< 2 us apart), %llu risky (inside the mode's worst case), closest %.2f us\n",
-            (unsigned long long)p->t_access, (unsigned long long)p->t_hard, (unsigned long long)p->t_risky,
-            p->t_min_gap < 1e8 ? p->t_min_gap : 0.0);
-    print_sites(out, "where (instruction of the too-early access):", p->sites, p->nsites, 1);
+    fprintf(out, "  VRAM transfers: %llu, closest %.2f us apart; a request before the previous one's slot (delay 8/11/13 cycles):\n"
+                 "    %llu lost, %llu likely lost, %llu marginal\n",
+            (unsigned long long)p->t_access, p->t_min_gap < 1e8 ? p->t_min_gap : 0.0,
+            (unsigned long long)p->t_lost, (unsigned long long)p->t_likely, (unsigned long long)p->t_marginal);
+    print_sites(out, "where (instruction of the request that came too early):", p->sites, p->nsites, 1);
     fprintf(out, "  sprites: %llu frames with lines over 4 sprites, %llu such lines, %llu sprite-lines lost\n",
             (unsigned long long)p->t_5s_frames, (unsigned long long)p->t_5s_lines, (unsigned long long)p->t_dropped);
     fprintf(out, "  NMI races on the VDP address/latch: %llu\n", (unsigned long long)p->t_race);

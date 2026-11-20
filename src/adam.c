@@ -665,6 +665,20 @@ static void run_dev(Dev6801 *d, uint64_t until_ps)
     while (d->cpu.cycles < until) m6801_step(&d->cpu);
 }
 
+/* T-state (from the start of the instruction at pc) at which its I/O machine cycle ends: the
+ * write strobe or the read sample. IN/OUT (n) and (C) end on their I/O cycle; the block
+ * instructions do it in the middle: OUTI/OTIR M1 4 + 5, memory read 3, I/O 4 (then 5 to repeat),
+ * INI/INIR M1 4 + 5, I/O 4, memory write 3 */
+static int io_cycle_end(Adam *a, uint16_t pc, int cycles)
+{
+    if (pc >= 0xFFC0) return cycles;                 /* do not touch the MegaCart trigger area */
+    if (z_read(a, pc) != 0xED) return cycles;
+    uint8_t op = z_read(a, (uint16_t)(pc + 1));
+    if ((op & 0xE7) == 0xA3) return 16;              /* OUTI OUTD OTIR OTDR */
+    if ((op & 0xE7) == 0xA2) return 13;              /* INI IND INIR INDR */
+    return cycles;
+}
+
 static void run_until(Adam *a, uint64_t end_ps)
 {
     while (a->now_ps < end_ps) {
@@ -692,8 +706,7 @@ static void run_until(Adam *a, uint64_t end_ps)
                 if (nmi) vdpprof_nmi(&a->prof, &a->vdp, pc0, a->z80.sp.w, a->z80_ps);
                 else {
                     if (a->vdp_kind >= 0) {
-                        /* the I/O cycle is the last machine cycle, before the 5-cycle repeat of OTIR/INIR */
-                        int at = c - (a->z80.pc.w == pc0 ? 5 : 0) - 1;
+                        int at = io_cycle_end(a, pc0, c);
                         vdpprof_access(&a->prof, &a->vdp, a->vdp_kind, a->z80_ps + (uint64_t)at * PS_PER_Z80,
                                        a->frame_start_ps, pc0, bank0);
                     }

@@ -191,9 +191,9 @@ int run_sdl(Adam *a, Typer *t, JoyScript *js)
         if (a->prof.enabled && a->frames % 30 == 0 && a->prof.intervals) {
             /* profile in the title bar: running totals */
             char title[160];
-            snprintf(title, sizeof title, "adamPC - busy avg %.0f%% max %.0f%%, overruns %llu, VRAM hard %llu risky %llu, sprite lines lost %llu",
+            snprintf(title, sizeof title, "adamPC - busy avg %.0f%% max %.0f%%, overruns %llu, VRAM lost %llu likely %llu, sprite lines lost %llu",
                      a->prof.busy_sum / (double)a->prof.intervals, a->prof.busy_max, (unsigned long long)a->prof.overruns,
-                     (unsigned long long)a->prof.t_hard, (unsigned long long)a->prof.t_risky, (unsigned long long)a->prof.t_5s_lines);
+                     (unsigned long long)a->prof.t_lost, (unsigned long long)a->prof.t_likely, (unsigned long long)a->prof.t_5s_lines);
             SDL_SetWindowTitle(win, title);
         }
         adam_run_frame(a);

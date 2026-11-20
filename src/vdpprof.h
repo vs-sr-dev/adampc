@@ -1,13 +1,24 @@
 /* vdpprof.h - VDP / frame-time profiler: what a TMS9918A program does that a forgiving
  * emulator would not show.
  *
- * VRAM access spacing (TMS9918A/28A/29A Data Manual, Nov 1982, 2.1.5 and Table 2-2): after a
- * VRAM transfer request the VDP needs about 2 µs, plus the wait for a CPU access window.
- * Total worst case: Graphics I/II active display 8 µs, Text 3.1 µs, Multicolor 3.5 µs; with
- * the screen blanked (R1 bit 6 = 0) or within 4300 µs after the frame interrupt, 2 µs.
- * An access closer than 2 µs to the previous one is always too fast ("hard"); one closer than
- * the worst case of the mode is not guaranteed and depends on where the access windows fall
- * in the line ("risky"). The exact slot positions are not modelled.
+ * VRAM transfers, slot model. The VDP gives the CPU fixed access slots on every line
+ * (src/vdpslots.h, from the openMSX timing diagram built on TI's 1978 master timing chart):
+ * Graphics I/II one slot every 16 memory cycles at worst (32 VDP cycles, the "once every 16
+ * memory cycles" of the TMS9918A Data Manual 2.1.5), Text one in three, the vertical border
+ * and a blanked screen one in two. After a transfer request (a data port read or write, or an
+ * address setup for reading) the VDP needs a delay before it can use a slot: the manual's
+ * "2 µs", which openMSX reads as 8-13 VDP cycles, 11 most likely. The transfer happens in the
+ * first CPU slot after that delay. A new request that arrives before that slot finds the
+ * previous transfer still pending:
+ *   lost        before the slot even with an 8-cycle delay
+ *   likely lost before the slot with the 11-cycle delay (the best guess)
+ *   marginal    only with a 12-13 cycle delay
+ * The model gives 43 VDP cycles = 28.7 Z80 cycles as the Graphics worst case and 11.3 for Text,
+ * the usual "29 cycles" and "12 cycles" rules. What the real chip does with the earlier byte is
+ * not documented, so adamPC only reports it and keeps every write.
+ * Line alignment: the frame flag is set at VDP cycle 319 of line 191 (end of the active
+ * display), which is where adamPC ends its line 191. Lines 0-191 and 261 (sprite prefetch for
+ * line 0) use the mode's pattern, the other lines and a blanked screen the border pattern.
  *
  * Frame time: the profiler watches for the program's idle loop (a short backward jump taken
  * again and again with no memory or I/O write in between, or HALT). The busy time of a frame
@@ -19,7 +30,7 @@
  * in the middle of a data transfer; status register reads outside the NMI handler that find
  * F = 1 while the interrupt is enabled (data manual 2.3: asynchronous reads take the flag; on a
  * ColecoVision the NMI is edge-triggered and still fires, but its handler then reads F, 5S and
- * C as 0). */
+ * C as 0); an NMI handler that returns with another MegaCart bank mapped than it found. */
 #ifndef VDPPROF_H
 #define VDPPROF_H
 #include <stdint.h>
@@ -29,16 +40,17 @@ enum { VP_DATA_W, VP_DATA_R, VP_SETUP_R, VP_SETUP_W, VP_REG_W, VP_STATUS_R, VP_S
 
 #define VP_SITES 64
 
-typedef struct VpSite { uint32_t key; uint32_t hard, risky; double min_gap_us; } VpSite;
+/* a program location and what happened there: n = lost (or the count, for races) */
+typedef struct VpSite { uint32_t key; uint32_t n, likely, marginal; double min_gap_us; } VpSite;
 
 typedef struct VdpProf {
     int enabled;
     FILE *csv;
-    int log_left;                  /* violations still printed one by one */
+    int log_left;                  /* problems still printed one by one */
 
-    /* VRAM spacing */
+    /* VRAM transfers */
     uint64_t last_ps;              /* time of the last transfer request */
-    double last_limit_us;          /* worst case the VDP needs after it */
+    uint64_t pend_ps[3];           /* its slot with an 8, 11, 13-cycle delay */
     int have_last;
 
     /* frame time */
@@ -62,14 +74,14 @@ typedef struct VdpProf {
     uint16_t clobber_main_pc;
 
     /* per-interval counters (frame flag to frame flag) */
-    uint32_t n_access, n_hard, n_risky, n_race, n_async, n_bankrace;
+    uint32_t n_access, n_lost, n_likely, n_marginal, n_race, n_async, n_bankrace;
     double min_gap_us;
     uint32_t n_5s_lines, n_dropped;
 
     /* totals */
     uint64_t intervals, overruns;
     double busy_sum, busy_max, nmi_max_us;
-    uint64_t t_access, t_hard, t_risky, t_race, t_async, t_5s_lines, t_dropped, t_5s_frames, t_bankrace;
+    uint64_t t_access, t_lost, t_likely, t_marginal, t_race, t_async, t_5s_lines, t_dropped, t_5s_frames, t_bankrace;
     double t_min_gap;
     VpSite sites[VP_SITES]; int nsites;
     VpSite races[16]; int nraces;
@@ -93,7 +105,8 @@ int vdpprof_write_pc(VdpProf *p, const char *path, int banked);
 
 struct TMS9918;
 void vdpprof_init(VdpProf *p);
-/* a VDP port access at time t (ps) by the instruction at pc (bank = MegaCart bank, -1 none) */
+/* a VDP port access at time t (ps) by the instruction at pc (bank = MegaCart bank, -1 none);
+ * frame_start = start of adamPC's line 0 */
 void vdpprof_access(VdpProf *p, const struct TMS9918 *v, int kind, uint64_t t, uint64_t frame_start,
                     uint16_t pc, int bank);
 /* after every instruction: pc before/after, sp after */
